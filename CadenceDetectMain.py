@@ -37,7 +37,6 @@ for file in os.listdir(SearsPath):
         #load file to detector
         CD.loadFile(FullPath)
         TotalNumMeasures = TotalNumMeasures + CD.getNumMeasures()
-        continue
         #set files
         CD.setFileName(file)
         CD.setWritePath(MyPath)
