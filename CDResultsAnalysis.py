@@ -63,10 +63,15 @@ for SearsFile in os.listdir(SearsPath):
 
 TotalNumMeasures = 2864
 TP = len(CommonPacs)
+print(TP)
 FP = len(TotalMyCadences)-len(CommonPacs)
+print(FP)
 TN = TotalNumMeasures - len(TotalSears) + FP
+print(TN)
 FN = len(TotalSears) - len(CommonPacs)
-print(CombinedTable)
+print(FN)
+for row in CombinedTable:
+    print(row)
 print("PACs Detected (TP) = ", TP, "out of", len(TotalSears))
 print("Precision = " , TP/(FP+TP))
 print("Recall = " , TP/(FN+TP))

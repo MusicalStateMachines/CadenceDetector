@@ -20,7 +20,9 @@ class CadenceDetector:
     def __init__(self):
         self.HarmonicStateMachine = CDStateMachine()
         self.NoteStream = []
+        self.NoteStreamRestless = []
         self.ChordStream = []
+        self.ChordStreamRestless = []
         self.KeyPerMeasure = []
         self.OptionalKeysPerMeasure = [[]]
         self.NumMeasures = 0
@@ -37,6 +39,13 @@ class CadenceDetector:
         self.analyze()
 
     def analyze(self):
+        self.removePickupMeasure()
+        self.ChordStream = self.NoteStream.chordify()
+        self.NumMeasures = len(self.ChordStream.recurse().getElementsByClass('Measure'))
+        self.NumMeasures = min(self.NumMeasures,MaxNumMeasures)
+        self.replaceRestWithPrevs()
+
+    def removePickupMeasure(self):
         Parts = self.NoteStream.getElementsByClass(stream.Part)
         self.hasPickupMeasure = 1
         for part in Parts:
@@ -44,9 +53,44 @@ class CadenceDetector:
                 self.hasPickupMeasure = 0
                 print("Pickup Cancelled")
                 break
-        self.ChordStream = self.NoteStream.chordify()
-        self.NumMeasures = len(self.ChordStream.recurse().getElementsByClass('Measure'))
-        self.NumMeasures = min(self.NumMeasures,MaxNumMeasures)
+
+    def replaceRestWithPrevs(self):
+        self.NoteStreamRestless = self.NoteStream
+        p=0
+        for curr_part in self.NoteStreamRestless.recurse().getElementsByClass(stream.Part):
+            if p<3:#bass only
+                p=p+1
+                continue
+            prev_note = []
+            for curr_measure in curr_part.recurse().getElementsByClass(stream.Measure):
+                measure_modifcations_list = []
+                #find rest and create modifications
+                for curr_item in curr_measure:
+                    if isinstance(curr_item,note.GeneralNote):
+                        if prev_note:
+                            if curr_item.isRest:
+                                noteFromRest = self.noteFromRestWithPitch(curr_item, prev_note.pitch)
+                                measure_modifcations_list.append([curr_measure.index(curr_item),noteFromRest])
+                            else:
+                                prev_note = curr_item
+                        elif not curr_item.isRest:
+                            prev_note = curr_item
+                #make modifications to measure
+                for curr_mod in measure_modifcations_list:
+                    curr_measure.pop(curr_mod[0])
+                    curr_measure.insert(curr_mod[1])
+
+        self.ChordStreamRestless = self.NoteStreamRestless.chordify()
+
+        #self.NoteStreamRestless.show()
+
+    def noteFromRestWithPitch(self,rest,pitch):
+        noteFromRest = note.Note(pitch)
+        noteFromRest.duration = rest.duration
+        noteFromRest.quarterLength = rest.quarterLength
+        noteFromRest.offset = rest.offset
+
+        return noteFromRest
 
     def getNumMeasures(self):
         return self.NumMeasures
@@ -82,7 +126,7 @@ class CadenceDetector:
 
         #loop thru optional keys per measure and determine key by highset distribution
 
-        for currMeasure in range(0,self.NumMeasures-1):
+        for currMeasure in range(0,self.NumMeasures):
             currOptionalKeys = self.OptionalKeysPerMeasure[currMeasure]
             key_counts = Counter(currOptionalKeys)
             mostCommonKey = key_counts.most_common(1)[0][0]
@@ -94,9 +138,9 @@ class CadenceDetector:
         fileName = self.fileName.replace(".", "_")
         FullPath = os.path.join(self.WritePath, fileName)
         text_file = open(f"{FullPath}_Analyzed.txt", "w")
-        for currMeasureIndex in range(0,self.NumMeasures-1):
+        for currMeasureIndex in range(0,self.NumMeasures):
             currKey = self.KeyPerMeasure[currMeasureIndex]#lists start with 0
-            CurrMeasures = self.ChordStream.measures(currMeasureIndex+1,currMeasureIndex+1)#measures start with 1
+            CurrMeasures = self.ChordStreamRestless.measures(currMeasureIndex+1,currMeasureIndex+1)#measures start with 1
             j = 0
             for thisChord in CurrMeasures.recurse().getElementsByClass('Chord'):
                 j = j + 1
@@ -107,14 +151,14 @@ class CadenceDetector:
                 #thisChord.lyric = str(rn.figure)
                 Lyric = self.HarmonicStateMachine.getCadentialStateString()
                 thisChord.lyric = Lyric
-                if "PAC" in Lyric or "IAC" in Lyric or "HC" in Lyric:
+                if "PAC" in Lyric or "IAC" in Lyric or "HC" in Lyric or "PCC" in Lyric:
                     print('Measure ', currMeasureIndex + 1 - self.hasPickupMeasure, " ", Lyric)
-                    print(f"Measure: {currMeasureIndex + 1 -self.hasPickupMeasure} {Lyric}", file=text_file)
+                    print(f"Measure: {currMeasureIndex + 1 - self.hasPickupMeasure} {Lyric}", file=text_file)
                 #thisChord.lyric = str("block ") + str(i)
         text_file.close()
-        for c in self.ChordStream.recurse().getElementsByClass('Chord'):
+        for c in self.ChordStreamRestless.recurse().getElementsByClass('Chord'):
             c.closedPosition(forceOctave=4, inPlace=True)
-        self.NoteStream.insert(0, self.ChordStream)
+        self.NoteStream.insert(0, self.ChordStreamRestless)
 
     def setFileName(self,fileName):
         self.fileName = fileName

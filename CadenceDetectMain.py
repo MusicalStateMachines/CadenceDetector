@@ -27,6 +27,9 @@ MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ResultsAndFiles/'
 TotalNumMeasures = 0
 
 import os
+import time
+
+start = time.time()
 for file in os.listdir(SearsPath):
     if file.endswith(FileEnding):
         #define path
@@ -42,7 +45,7 @@ for file in os.listdir(SearsPath):
         CD.setWritePath(MyPath)
         #CD.loadMusic21Corpus(music21file)
         #define params
-        blockSize = 8 #in measures
+        blockSize = 4 #in measures
         overlap = 1/blockSize #ratio from block size
         #detect key per measure
         CD.detectKeyPerMeasure(blockSize,overlap)
@@ -55,4 +58,7 @@ for file in os.listdir(SearsPath):
         #display
         #CD.displayFull()
 
-print(TotalNumMeasures)
+print("Total Measures",TotalNumMeasures)
+end = time.time()
+total_time = end - start
+print("Elapsed time",total_time/60,"minutes")

@@ -3,6 +3,8 @@ from enum import Enum
 
 #consts
 MaxNumMeasures = 200
+MinInitialMeasures = 3
+MinPostCadenceMeasures = 3
 
 # class MyChord(chord.Chord):
 #     def __init__(self, Chord, Key):
@@ -19,6 +21,9 @@ class CDCadentialStates(Enum):
     HCArrival = 7
     IACArrivalExpected = 8
     HCArrivalExpected = 9
+    PCCArrival = 10
+    PACAppoggExpected = 11
+    IACAppoggExpected = 12
 
 
 class CDHarmonicChordDegrees(Enum):
