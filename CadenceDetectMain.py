@@ -19,7 +19,8 @@ DownloadsPath = '/Users/matanba/Downloads/'
 #file = 'haydn_string_quartet_33_2_(c)harfesoft.xml'
 #file = 'mozart_chamber_music_502_(c)harfesoft.xml' - bad file ?
 
-SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/5387755/'
+SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
+FileEnding = "haydn_op055_no03_mv01.xml"
 FileEnding = ".xml"
 
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ResultsAndFiles/'
@@ -49,6 +50,10 @@ for file in os.listdir(SearsPath):
         overlap = 1/blockSize #ratio from block size
         #detect key per measure
         CD.detectKeyPerMeasure(blockSize,overlap)
+        #write To file
+        CD.writeKeyPerMeasureToFile()
+        #read from file
+        CD.readKeyPerMeasureFromFile()
         #detect cadences per key
         CD.detectCadences()
         try:

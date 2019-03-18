@@ -1,13 +1,15 @@
 import os
-SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/5387755/'
+SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 FileEnding = ".txt"
 SearCadenceViolinMeasureIndex = 2
 MyPath ='/Users/matanba/Dropbox/PhD/CadencesResearch/ResultsAndFiles/'
 MyCadenceMeasureIndex = 1
 CombinedTable = []
-CommonPacs = []
 TotalSears = []
 TotalMyCadences = []
+TotalCommonPacs = []
+TotalFP = []
+TotalFN = []
 
 for SearsFile in os.listdir(SearsPath):
     if SearsFile.endswith(FileEnding):
@@ -15,8 +17,10 @@ for SearsFile in os.listdir(SearsPath):
         FullPath = os.path.join(SearsPath, SearsFile)
         print(f"Analyzing {FullPath}")
 
-        SearsCadences = []
-        MyCadences = []
+        CurrSearsCadences = []
+        CurrMyCadences = []
+        CurrFalsePositives = []
+        CurrFalseNegatives = []
 
         #find sears cadences
         with open(FullPath,'r') as f:
@@ -32,7 +36,7 @@ for SearsFile in os.listdir(SearsPath):
                     if "PAC" in line:
                         elements = line.strip().split("\t")
                         print(elements, len(elements))
-                        SearsCadences.append(str(elements[SearCadenceViolinMeasureIndex]))
+                        CurrSearsCadences.append(str(elements[SearCadenceViolinMeasureIndex]))
                         #print(line, file=text_file_reduced)
 
         # find equivalent in MyPath
@@ -45,42 +49,77 @@ for SearsFile in os.listdir(SearsPath):
                 if "PAC" in line:
                     elements = line.strip().split(" ")
                     print(elements, len(elements))
-                    MyCadences.append(str(elements[MyCadenceMeasureIndex]))
+                    CurrMyCadences.append(str(elements[MyCadenceMeasureIndex]))
 
         FileNameForText = SearsFile.replace(".txt", " ")
         FileNameForText = FileNameForText.replace("_", " ")
 
-        for item in list(set(SearsCadences).intersection(MyCadences)):
-            CommonPacs.append(item)
+        for item in list(set(CurrSearsCadences).intersection(CurrMyCadences)):
+            TotalCommonPacs.append(item)
 
-        for item in SearsCadences:
-            TotalSears.append(SearsCadences)
+        for item in CurrSearsCadences:
+            TotalSears.append(CurrSearsCadences)
 
-        for item in MyCadences:
-            TotalMyCadences.append(MyCadences)
+        for item in CurrMyCadences:
+            TotalMyCadences.append(CurrMyCadences)
 
-        CombinedTable.append([FileNameForText,",".join(SearsCadences),",".join(MyCadences)])
+        for item in list(set(CurrMyCadences).symmetric_difference(CurrSearsCadences)):
+            if item in CurrMyCadences:
+                CurrFalsePositives.append(item)
+            else:
+                CurrFalseNegatives.append(item)
 
-TotalNumMeasures = 2864
-TP = len(CommonPacs)
-print(TP)
-FP = len(TotalMyCadences)-len(CommonPacs)
-print(FP)
-TN = TotalNumMeasures - len(TotalSears) + FP
-print(TN)
-FN = len(TotalSears) - len(CommonPacs)
-print(FN)
+        for item in CurrFalsePositives:
+            TotalFP.append(CurrFalsePositives)
+
+        for item in CurrFalseNegatives:
+            TotalFN.append(CurrFalseNegatives)
+
+
+        CombinedTable.append([FileNameForText,",".join(CurrSearsCadences), ",".join(CurrMyCadences), ",".join(CurrFalsePositives), ",".join(CurrFalseNegatives)])
+
+
+
 for row in CombinedTable:
     print(row)
-print("PACs Detected (TP) = ", TP, "out of", len(TotalSears))
-print("Precision = " , TP/(FP+TP))
-print("Recall = " , TP/(FN+TP))
-print("Accuracy = " , (TP+TN)/(TP+TN+FP+FN))
-print("Specificity = " , TN/(FP+TN))
 
-#write table in latex format
+#write table1 in latex format
 fileNameResults = "ResultsLatexTable.txt"
 FullPathResults = os.path.join(MyPath, fileNameResults)
 text_file_results = open(FullPathResults, "w")
 print(" \\\\\n".join([" & ".join(map(str, line)) for line in CombinedTable]), file=text_file_results)
 text_file_results.close()
+
+#write table2 in latex format
+fileNameResults = "ClassificationResultsLatexTable.txt"
+FullPathResults = os.path.join(MyPath, fileNameResults)
+text_file_results = open(FullPathResults, "w")
+ClassificationResultsTable=[]
+TotalNumMeasures = 2864
+
+TP = len(TotalCommonPacs)
+FP = len(TotalFP)
+TN = TotalNumMeasures - len(TotalSears) - FP
+FN = len(TotalFN)
+
+Precision = TP/(FP+TP)
+Recall = TP/(FN+TP)
+Accuracy = (TP+TN)/(TP+TN+FP+FN)
+Specificity = TN/(FP+TN)
+
+ClassificationResultsTable.append(["Total Measures Analyzed", TotalNumMeasures])
+ClassificationResultsTable.append([f"PACs Detected",f"{TP} out of {len(TotalSears)}"])
+ClassificationResultsTable.append(["TP",TP])
+ClassificationResultsTable.append(["FP",FP])
+ClassificationResultsTable.append(["TN",TN])
+ClassificationResultsTable.append(["FN",FN])
+ClassificationResultsTable.append(["Precision" , "{0:0.2f}".format(Precision)])
+ClassificationResultsTable.append(["Recall" , "{0:0.2f}".format(Recall)])
+ClassificationResultsTable.append(["Accuracy" , "{0:0.2f}".format(Accuracy)])
+ClassificationResultsTable.append(["Specificity" , "{0:0.2f}".format(Specificity)])
+
+print(" \\\\\n".join([" & ".join(map(str, line)) for line in ClassificationResultsTable]), file=text_file_results)
+text_file_results.close()
+
+for row in ClassificationResultsTable:
+    print(row)
