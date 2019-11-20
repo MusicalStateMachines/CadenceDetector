@@ -20,19 +20,27 @@ DownloadsPath = '/Users/matanba/Downloads/'
 #file = 'mozart_chamber_music_502_(c)harfesoft.xml' - bad file ?
 
 SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
-FileEnding = "haydn_op055_no03_mv01.xml"
-FileEnding = ".xml"
+MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
+#SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
+XMLFileEnding = ".xml"
+#===for testing a single file
+#SearsPath = "/Users/matanba/Dropbox/PhD/CadencesResearch/CorpusStudiesConference/"
+#XMLFileEnding = "Joseph_Haydn_-_String_quartet_-_Op._76_no.5_in_D_major_-_Movement_I.mxl"
 
-MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ResultsAndFiles/'
+TextFileEnding = ".txt"
 
-TotalNumMeasures = 0
+#settings
+ReadKeyFromSears = 1
+DoParallelProcessing = 1
+
 
 import os
 import time
+import multiprocessing as mp
 
-start = time.time()
-for file in os.listdir(SearsPath):
-    if file.endswith(FileEnding):
+def findCadencesInFile(file):
+    #for file in sorted(os.listdir(SearsPath)):
+    if file.endswith(XMLFileEnding):
         #define path
         FullPath = os.path.join(SearsPath, file)
         print(f"Analyzing {FullPath}")
@@ -40,7 +48,6 @@ for file in os.listdir(SearsPath):
         CD = CadenceDetector()
         #load file to detector
         CD.loadFile(FullPath)
-        TotalNumMeasures = TotalNumMeasures + CD.getNumMeasures()
         #set files
         CD.setFileName(file)
         CD.setWritePath(MyPath)
@@ -49,7 +56,10 @@ for file in os.listdir(SearsPath):
         blockSize = 4 #in measures
         overlap = 1/blockSize #ratio from block size
         #detect key per measure
-        CD.detectKeyPerMeasure(blockSize,overlap)
+        if ReadKeyFromSears:
+            CD.getKeyPerMeasureFromSearsFile(FullPath)
+        else:
+            CD.detectKeyPerMeasure(blockSize,overlap)
         #write To file
         CD.writeKeyPerMeasureToFile()
         #read from file
@@ -63,7 +73,21 @@ for file in os.listdir(SearsPath):
         #display
         #CD.displayFull()
 
-print("Total Measures",TotalNumMeasures)
+
+
+fileList = sorted(os.listdir(SearsPath))
+start = time.time()
+if DoParallelProcessing:
+    print("Parallel Processing On")
+    print("Number of processors: ", mp.cpu_count())
+    pool = mp.Pool(mp.cpu_count())
+    pool.map_async(findCadencesInFile, [file for file in fileList]).get()
+    pool.close()
+else:
+    print("Parallel Processing Off")
+    for file in fileList:
+        findCadencesInFile(file)
+
 end = time.time()
 total_time = end - start
 print("Elapsed time",total_time/60,"minutes")

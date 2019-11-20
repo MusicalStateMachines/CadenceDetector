@@ -2,16 +2,17 @@ import os
 SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 FileEnding = ".txt"
 SearCadenceViolinMeasureIndex = 2
-MyPath ='/Users/matanba/Dropbox/PhD/CadencesResearch/ResultsAndFiles/'
+MyPath ='/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 MyCadenceMeasureIndex = 1
 CombinedTable = []
+CombinedTableExtended=[];
 TotalSears = []
 TotalMyCadences = []
 TotalCommonPacs = []
 TotalFP = []
 TotalFN = []
 
-for SearsFile in os.listdir(SearsPath):
+for SearsFile in sorted(os.listdir(SearsPath)):
     if SearsFile.endswith(FileEnding):
         #define path for Sears
         FullPath = os.path.join(SearsPath, SearsFile)
@@ -76,23 +77,22 @@ for SearsFile in os.listdir(SearsPath):
             TotalFN.append(CurrFalseNegatives)
 
 
-        CombinedTable.append([FileNameForText,",".join(CurrSearsCadences), ",".join(CurrMyCadences), ",".join(CurrFalsePositives), ",".join(CurrFalseNegatives)])
+        CombinedTable.append([FileNameForText,",".join(CurrSearsCadences), ",".join(CurrMyCadences)])
+        CombinedTableExtended.append([FileNameForText,",".join(CurrSearsCadences), ",".join(CurrMyCadences), ",".join(CurrFalsePositives), ",".join(CurrFalseNegatives)])
 
 
 
-for row in CombinedTable:
+for row in CombinedTableExtended:
     print(row)
 
 #write table1 in latex format
-fileNameResults = "ResultsLatexTable.txt"
-FullPathResults = os.path.join(MyPath, fileNameResults)
+FullPathResults = os.path.join(MyPath,"../Results/ResultsLatexTable.txt")
 text_file_results = open(FullPathResults, "w")
 print(" \\\\\n".join([" & ".join(map(str, line)) for line in CombinedTable]), file=text_file_results)
 text_file_results.close()
 
 #write table2 in latex format
-fileNameResults = "ClassificationResultsLatexTable.txt"
-FullPathResults = os.path.join(MyPath, fileNameResults)
+FullPathResults = os.path.join(MyPath, "../Results/ClassificationResultsLatexTable.txt")
 text_file_results = open(FullPathResults, "w")
 ClassificationResultsTable=[]
 TotalNumMeasures = 2864

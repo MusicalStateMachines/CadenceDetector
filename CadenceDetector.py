@@ -5,6 +5,8 @@ import math
 import os
 import numpy
 import pickle
+import enum
+import copy
 
 class CadenceDetector:
     HarmonicStateMachine = CDStateMachine()
@@ -42,12 +44,23 @@ class CadenceDetector:
 
     def analyze(self):
         self.removePickupMeasure()
-        self.ChordStream = self.NoteStream.chordify()
+        try:
+            self.ChordStream = self.NoteStream.chordify(addPartIdAsGroup=True)
+            self.HarmonicStateMachine.CheckBassPartFromChord = True
+        except:
+            print("Cannot add parts to chords!!")
+            self.ChordStream = self.NoteStream.chordify()
+            self.HarmonicStateMachine.CheckBassPartFromChord = False
+
+
         self.NumMeasures = len(self.ChordStream.recurse().getElementsByClass('Measure'))
         self.NumMeasures = min(self.NumMeasures,MaxNumMeasures)
-        self.NoteStreamRestless = self.NoteStream
+        self.NoteStreamRestless = copy.deepcopy(self.NoteStream)  #create new list so as not to alter the original stream
         self.replaceBassRestsWithPrevs()
-        self.ChordStreamRestless = self.NoteStreamRestless.chordify()
+        if self.HarmonicStateMachine.CheckBassPartFromChord==True:
+            self.ChordStreamRestless = self.NoteStreamRestless.chordify(addPartIdAsGroup=True)
+        else:
+            self.ChordStreamRestless = self.NoteStreamRestless.chordify()
 
     def removePickupMeasure(self):
         Parts = self.NoteStream.getElementsByClass(stream.Part)
@@ -66,8 +79,8 @@ class CadenceDetector:
                 p=p+1
                 continue
 
-            prev_note = [] #should we complete bass between measures ???
             for curr_measure in curr_part.recurse().getElementsByClass(stream.Measure):
+                prev_note = []  # should we complete bass between measures ???
                 measure_modifcations_list = []
                 #find rest and create modifications
                 for curr_item in curr_measure.recurse().getElementsByClass(note.GeneralNote):
@@ -82,6 +95,9 @@ class CadenceDetector:
                 #make modifications to measure
                 for curr_mod in measure_modifcations_list:
                     curr_measure.replace(curr_mod[0],curr_mod[1])
+
+            #overwriting part ID for later cadence detection, because some files cannot be trusted for this metadata
+            curr_part.id = 'MyCello'
 
         #self.NoteStreamRestless.show()
 
@@ -134,6 +150,7 @@ class CadenceDetector:
             key_counts = Counter(currOptionalKeys)
             mostCommonKey = key_counts.most_common(1)[0][0]
             self.KeyPerMeasure.append(mostCommonKey)
+            ####====debug with constant key
             #self.KeyPerMeasure.append(key.Key('D'))#akjshdgakdshg  - temp debug set constant key
 
 
@@ -153,33 +170,97 @@ class CadenceDetector:
         with open(KeyFile, 'rb') as f:
             self.KeyPerMeasure=pickle.load(f)
 
+    def getKeyPerMeasureFromSearsFile(self,FullPath):
+        FullPath = FullPath.replace(".xml", ".txt")
+
+        class SearKeyDataIndices(enum.IntEnum):
+            Key = 0
+            Mode = 1
+            StartBar = 2
+            StartPulse = 3
+            EndBar = 4
+            EndPulse = 5
+
+        with open(FullPath,'r') as f:
+            lines = f.readlines()
+            FoundRow = 0
+            totalNumMeasures = 0
+            startMeasure = 0
+            endMeasure = -1
+            for line in lines:
+                if FoundRow==0:
+                    if "Tonal Region" in line:
+                        FoundRow = 1
+                        continue
+                else:
+                    if "Major" in line or "Minor" in line:
+                        elements = line.strip().split("\t")
+                        currKey = self.mapSearsKeyToMusic21Key(elements[SearKeyDataIndices.Key],elements[SearKeyDataIndices.Mode])
+                        print(elements, len(elements))
+                        #print(line, file=text_file_reduced)
+                        startMeasure = elements[SearKeyDataIndices.StartBar]
+
+                        if "Begin" in startMeasure:
+                            startMeasure = 1
+                        else:
+                            startMeasure = int(startMeasure)
+
+                        # check if start measure is before prev end measure then there is an overlap in tonal regions (TBD - what to do with this?)
+                        if startMeasure<=endMeasure:
+                            startMeasure = endMeasure + 1
+
+                        endMeasure = elements[SearKeyDataIndices.EndBar]
+                        if "End" in endMeasure:
+                            endMeasure = self.NumMeasures
+                        else:
+                            endMeasure = int(endMeasure)
+
+                        numMeasuresToAppend = endMeasure-startMeasure+1 #including start and end
+
+                        for i in range(numMeasuresToAppend):
+                            self.KeyPerMeasure.append(currKey)
+
+            print("KeysLen=", len(self.KeyPerMeasure))
+            print("NumMeasures=",self.NumMeasures)
+
+    def mapSearsKeyToMusic21Key(self,SearStringKey, SearStringMode):
+        Music21StringKey = SearStringKey.replace("b","-")
+        Music21StringMode = SearStringMode.replace("M","m")
+        return key.Key(Music21StringKey,Music21StringMode)
+
+
     def detectCadences(self):
         print("Detecting cadences...")
         fileName = self.fileName.replace(".", "_")
         FullPath = os.path.join(self.WritePath, fileName)
         text_file = open(f"{FullPath}_Analyzed.txt", "w")
+        text_fileOffsets = open(f"{FullPath}_Analyzed_OffsetsNums.txt", "w")
+
+        measuresSecondsMap = list(filter(lambda d: d['durationSeconds'] > 0, self.ChordStreamRestless.secondsMap));
 
         for currMeasureIndex in range(0,self.NumMeasures):
             currKey = self.KeyPerMeasure[currMeasureIndex]#lists start with 0
             CurrMeasures = self.ChordStreamRestless.measures(currMeasureIndex+1,currMeasureIndex+1)#measures start with 1
             #debug
-            #if currMeasureIndex==44:
-            #    bla=0
+            if currMeasureIndex==36:
+                bla=0
             j = 0
             for thisChord in CurrMeasures.recurse().getElementsByClass('Chord'):
                 j = j + 1
                 rn = roman.romanNumeralFromChord(thisChord,currKey)
                 self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, rn.scaleDegree, rn.inversion(), rn.figure)
                 # debugging
-                #print(self.HarmonicStateMachine.getCadentialState().value)
+                #print(self.HarmonicStateMachine.getCadentialOutput().value)
                 #thisChord.lyric = str(rn.figure)
-                Lyric = self.HarmonicStateMachine.getCadentialStateString()
+                Lyric = self.HarmonicStateMachine.getCadentialOutputString()
                 thisChord.lyric = Lyric
                 if "PAC" in Lyric or "IAC" in Lyric or "HC" in Lyric or "PCC" in Lyric:
-                    print('Measure ', currMeasureIndex + 1 - self.hasPickupMeasure, " ", Lyric)
-                    print(f"Measure: {currMeasureIndex + 1 - self.hasPickupMeasure} {Lyric}", file=text_file)
+                    print('Measure ', currMeasureIndex + 1 - self.hasPickupMeasure, ' offset ', measuresSecondsMap[currMeasureIndex - self.hasPickupMeasure]['offsetSeconds'], " ", Lyric)
+                    print(f"Measure: {currMeasureIndex + 1 - self.hasPickupMeasure} Offset: {measuresSecondsMap[currMeasureIndex - self.hasPickupMeasure]['offsetSeconds']} {Lyric}", file=text_file)
+                    print(f"{currMeasureIndex + 1 - self.hasPickupMeasure} {measuresSecondsMap[currMeasureIndex - self.hasPickupMeasure]['offsetSeconds']} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileOffsets)
                 #thisChord.lyric = str("block ") + str(i)
         text_file.close()
+        text_fileOffsets.close()
         for c in self.ChordStreamRestless.recurse().getElementsByClass('Chord'):
             c.closedPosition(forceOctave=4, inPlace=True)
         self.NoteStream.insert(0, self.ChordStreamRestless)

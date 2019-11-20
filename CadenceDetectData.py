@@ -25,7 +25,6 @@ class CDCadentialStates(Enum):
     PACAppoggExpected = 11
     IACAppoggExpected = 12
 
-
 class CDHarmonicChordDegrees(Enum):
     I = 1
     II = 2
