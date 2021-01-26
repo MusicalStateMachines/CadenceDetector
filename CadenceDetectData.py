@@ -19,11 +19,12 @@ class CDCadentialStates(Enum):
     CadAvoided = 5
     IACArrival = 6
     HCArrival = 7
-    IACArrivalExpected = 8
-    HCArrivalExpected = 9
-    PCCArrival = 10
-    PACAppoggExpected = 11
-    IACAppoggExpected = 12
+    HCArrivalExpected = 8
+    PCCArrival = 9
+    PACAppoggExpected = 10
+    IACAppoggExpected = 11
+    IACArrivalExpected = 12
+    HCAppoggExpected = 13
 
 class CDHarmonicChordDegrees(Enum):
     I = 1

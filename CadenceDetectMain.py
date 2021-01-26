@@ -22,10 +22,11 @@ DownloadsPath = '/Users/matanba/Downloads/'
 SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
+#XMLFileEnding = "haydn_op054_no02_mv01.xml"
 XMLFileEnding = ".xml"
 #===for testing a single file
-#SearsPath = "/Users/matanba/Dropbox/PhD/CadencesResearch/CorpusStudiesConference/"
-#XMLFileEnding = "Joseph_Haydn_-_String_quartet_-_Op._76_no.5_in_D_major_-_Movement_I.mxl"
+#SearsPath = "/Users/matanba/Downloads/"
+#XMLFileEnding = "Piano_Sonata_No.11_in_A_major-K.331W._A._Mozart.xml"
 
 TextFileEnding = ".txt"
 

@@ -57,6 +57,7 @@ class CadenceDetector:
         self.NumMeasures = min(self.NumMeasures,MaxNumMeasures)
         self.NoteStreamRestless = copy.deepcopy(self.NoteStream)  #create new list so as not to alter the original stream
         self.replaceBassRestsWithPrevs()
+        self.addMyLablesToParts();
         if self.HarmonicStateMachine.CheckBassPartFromChord==True:
             self.ChordStreamRestless = self.NoteStreamRestless.chordify(addPartIdAsGroup=True)
         else:
@@ -71,6 +72,20 @@ class CadenceDetector:
                 print("Pickup Cancelled")
                 break
 
+    def addMyLablesToParts(self):
+        p = 0
+        for curr_part in self.NoteStreamRestless.recurse().getElementsByClass(stream.Part):
+            if p == 0:  # assuming soprano is p=0
+                curr_part.id = 'MySoprano'
+            elif p == 1: # assuming alto is p=1
+                curr_part.id = 'MyAlto'
+            elif p == 2: # assuming tenor is p=2
+                curr_part.id = 'MyTenor'
+            elif p == 3: # assuming basso is p=2
+                curr_part.id = 'MyBasso'
+            p=p+1
+
+
     def replaceBassRestsWithPrevs(self):
 
         p=0
@@ -78,9 +93,9 @@ class CadenceDetector:
             if not p==3:#bass only, assuming bass is p=3
                 p=p+1
                 continue
-
+            prev_note = []
             for curr_measure in curr_part.recurse().getElementsByClass(stream.Measure):
-                prev_note = []  # should we complete bass between measures ???
+                #prev_note = []  # should we complete bass between measures ???
                 measure_modifcations_list = []
                 #find rest and create modifications
                 for curr_item in curr_measure.recurse().getElementsByClass(note.GeneralNote):
@@ -96,8 +111,6 @@ class CadenceDetector:
                 for curr_mod in measure_modifcations_list:
                     curr_measure.replace(curr_mod[0],curr_mod[1])
 
-            #overwriting part ID for later cadence detection, because some files cannot be trusted for this metadata
-            curr_part.id = 'MyCello'
 
         #self.NoteStreamRestless.show()
 
@@ -122,7 +135,7 @@ class CadenceDetector:
             StopMeasure = min(currBlock + self.blockSize - 1,self.NumMeasures)
             if StopMeasure<currBlock:
                 break
-            CurrMeasures = self.ChordStream.measures(currBlock, StopMeasure)
+            CurrMeasures = self.ChordStreamRestless.measures(currBlock, StopMeasure)
             #print(currBlock, StopMeasure)
             Key = CurrMeasures.analyze('key')
             #print(Key)
@@ -235,35 +248,66 @@ class CadenceDetector:
         FullPath = os.path.join(self.WritePath, fileName)
         text_file = open(f"{FullPath}_Analyzed.txt", "w")
         text_fileOffsets = open(f"{FullPath}_Analyzed_OffsetsNums.txt", "w")
+        text_fileTransitions = open(f"{FullPath}_Analyzed_Transitions.txt", "w")
 
-        measuresSecondsMap = list(filter(lambda d: d['durationSeconds'] > 0, self.ChordStreamRestless.secondsMap));
+        measuresSecondsMap = list(filter(lambda d: d['durationSeconds'] > 0, self.ChordStreamRestless.secondsMap))
+
+        prevState = []
 
         for currMeasureIndex in range(0,self.NumMeasures):
             currKey = self.KeyPerMeasure[currMeasureIndex]#lists start with 0
-            CurrMeasures = self.ChordStreamRestless.measures(currMeasureIndex+1,currMeasureIndex+1)#measures start with 1
-            #debug
-            if currMeasureIndex==36:
+            CurrMeasuresRestless= self.ChordStreamRestless.measures(currMeasureIndex+1,currMeasureIndex+1)#measures start with 1
+            #debug per measure
+            if currMeasureIndex==79:
                 bla=0
-            j = 0
-            for thisChord in CurrMeasures.recurse().getElementsByClass('Chord'):
-                j = j + 1
+
+            LyricPerBeat = []
+
+            for thisChord in CurrMeasuresRestless.recurse().getElementsByClass('Chord'):
                 rn = roman.romanNumeralFromChord(thisChord,currKey)
                 self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, rn.scaleDegree, rn.inversion(), rn.figure)
                 # debugging
-                #print(self.HarmonicStateMachine.getCadentialOutput().value)
-                #thisChord.lyric = str(rn.figure)
+                # print(self.HarmonicStateMachine.getCadentialOutput().value)
+                # thisChord.lyric = str(rn.figure)
                 Lyric = self.HarmonicStateMachine.getCadentialOutputString()
-                thisChord.lyric = Lyric
-                if "PAC" in Lyric or "IAC" in Lyric or "HC" in Lyric or "PCC" in Lyric:
-                    print('Measure ', currMeasureIndex + 1 - self.hasPickupMeasure, ' offset ', measuresSecondsMap[currMeasureIndex - self.hasPickupMeasure]['offsetSeconds'], " ", Lyric)
-                    print(f"Measure: {currMeasureIndex + 1 - self.hasPickupMeasure} Offset: {measuresSecondsMap[currMeasureIndex - self.hasPickupMeasure]['offsetSeconds']} {Lyric}", file=text_file)
-                    print(f"{currMeasureIndex + 1 - self.hasPickupMeasure} {measuresSecondsMap[currMeasureIndex - self.hasPickupMeasure]['offsetSeconds']} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileOffsets)
-                #thisChord.lyric = str("block ") + str(i)
+                if Lyric:   # only work on non-empty lyrics
+                    thisChord.lyric = Lyric
+                    LyricPerBeat.append([thisChord.beat,Lyric])
+                    if "PAC" in Lyric or "IAC" in Lyric or "HC" in Lyric or "PCC" in Lyric:
+                        print('Measure ', currMeasureIndex + 1 - self.hasPickupMeasure, ' offset ', measuresSecondsMap[currMeasureIndex]['offsetSeconds'], " ", Lyric)
+                        print(f"Measure: {currMeasureIndex + 1 - self.hasPickupMeasure} Offset: {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {Lyric}", file=text_file)
+                        print(f"{currMeasureIndex + 1 - self.hasPickupMeasure} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileOffsets)
+
+                    print(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds'] + measuresSecondsMap[currMeasureIndex]['durationSeconds']*(thisChord.beat-1)/CurrMeasuresRestless.duration.quarterLength:.1f} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileTransitions)
+                # save transitions to file regardless of Lyrics
+                # if prevState != self.HarmonicStateMachine.getCadentialOutput().value:
+                #    print(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileTransitions)
+                # prevState = self.HarmonicStateMachine.getCadentialOutput().value
+                # thisChord.lyric = str("block ") + str(i)
+
+            CurrMeasuresNotes = self.NoteStream.measures(currMeasureIndex + 1, currMeasureIndex + 1)
+            Parts = CurrMeasuresNotes.getElementsByClass(stream.Part)
+            for thisLyric in LyricPerBeat:
+                found = 0
+
+                for thisNote in Parts[-1].flat.notesAndRests:  # adding lyric only to last part assuming its the bass line
+                    if thisNote.beat == thisLyric[0]:
+                        thisNote.lyric = thisLyric[1]
+                        found = 1
+                        break
+                if found == 1:
+                    continue
+
+
+
+
         text_file.close()
         text_fileOffsets.close()
+        text_fileTransitions.close()
         for c in self.ChordStreamRestless.recurse().getElementsByClass('Chord'):
             c.closedPosition(forceOctave=4, inPlace=True)
-        self.NoteStream.insert(0, self.ChordStreamRestless)
+        # this adds the restless chord stream to the note stream
+        # self.NoteStream.insert(0, self.ChordStream)
 
     def setFileName(self,fileName):
         self.fileName = fileName
