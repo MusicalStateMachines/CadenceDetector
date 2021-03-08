@@ -22,7 +22,7 @@ DownloadsPath = '/Users/matanba/Downloads/'
 SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
-#XMLFileEnding = "haydn_op054_no02_mv01.xml"
+XMLFileEnding = "haydn_op064_no03_mv01.xml"
 XMLFileEnding = ".xml"
 #===for testing a single file
 #SearsPath = "/Users/matanba/Downloads/"

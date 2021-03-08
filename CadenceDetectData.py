@@ -4,7 +4,7 @@ from enum import Enum
 #consts
 MaxNumMeasures = 200
 MinInitialMeasures = 3
-MinPostCadenceMeasures = 3
+MinPostCadenceMeasures = 1
 
 # class MyChord(chord.Chord):
 #     def __init__(self, Chord, Key):
@@ -44,9 +44,10 @@ class CDHarmonicChordInversions(Enum):
 
 
 class CDHarmonicState:
-    def __init__(self, Key, Chord, ChordDegree, ChordInversion, ChordFigure):
+    def __init__(self, Key, Chord, ChordWithRests,  ChordDegree, ChordInversion, ChordFigure):
         self.Key = Key
         self.Chord = Chord
+        self.ChordWithBassRests = ChordWithRests
         self.ChordDegree = ChordDegree
         self.ChordInversion = ChordInversion
         self.ChordFigure = ChordFigure
