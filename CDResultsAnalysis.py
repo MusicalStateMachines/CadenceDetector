@@ -2,19 +2,20 @@ import os
 SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 FileEnding = ".txt"
 SearCadenceViolinMeasureIndex = 2
-MyPath ='/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
+MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 MyCadenceMeasureIndex = 1
 CombinedTable = []
-CombinedTableExtended=[];
+CombinedTableExtended = []
 TotalSears = []
 TotalMyCadences = []
 TotalCommonPacs = []
 TotalFP = []
 TotalFN = []
+CadenceString = "PAC"
 
 for SearsFile in sorted(os.listdir(SearsPath)):
     if SearsFile.endswith(FileEnding):
-        #define path for Sears
+        # define path for Sears
         FullPath = os.path.join(SearsPath, SearsFile)
         print(f"Analyzing {FullPath}")
 
@@ -23,22 +24,22 @@ for SearsFile in sorted(os.listdir(SearsPath)):
         CurrFalsePositives = []
         CurrFalseNegatives = []
 
-        #find sears cadences
-        with open(FullPath,'r') as f:
+        # find sears cadences
+        with open(FullPath, 'r') as f:
             lines = f.readlines()
 
             FoundRow = 0
             for line in lines:
-                if FoundRow==0:
+                if FoundRow == 0:
                     if "Cadence Category" in line:
                         FoundRow = 1
                         continue
                 else:
-                    if "PAC" in line:
+                    if CadenceString in line:
                         elements = line.strip().split("\t")
                         print(elements, len(elements))
                         CurrSearsCadences.append(str(elements[SearCadenceViolinMeasureIndex]))
-                        #print(line, file=text_file_reduced)
+                        # print(line, file=text_file_reduced)
 
         # find equivalent in MyPath
         MyFile = SearsFile.replace(".txt", "_xml_Analyzed.txt")
@@ -47,7 +48,7 @@ for SearsFile in sorted(os.listdir(SearsPath)):
         with open(MyFullPath,'r') as f:
             lines = f.readlines()
             for line in lines:
-                if "PAC" in line:
+                if CadenceString in line:
                     elements = line.strip().split(" ")
                     print(elements, len(elements))
                     CurrMyCadences.append(str(elements[MyCadenceMeasureIndex]))
@@ -76,25 +77,23 @@ for SearsFile in sorted(os.listdir(SearsPath)):
         for item in CurrFalseNegatives:
             TotalFN.append(CurrFalseNegatives)
 
-
-        CombinedTable.append([FileNameForText,",".join(CurrSearsCadences), ",".join(CurrMyCadences)])
-        CombinedTableExtended.append([FileNameForText,",".join(CurrSearsCadences), ",".join(CurrMyCadences), ",".join(CurrFalsePositives), ",".join(CurrFalseNegatives)])
-
-
+        CombinedTable.append([FileNameForText, ",".join(CurrSearsCadences), ",".join(CurrMyCadences)])
+        CombinedTableExtended.append([FileNameForText, ",".join(CurrSearsCadences), ",".join(CurrMyCadences),
+                                      ",".join(CurrFalsePositives), ",".join(CurrFalseNegatives)])
 
 for row in CombinedTableExtended:
     print(row)
 
-#write table1 in latex format
+# write table1 in latex format
 FullPathResults = os.path.join(MyPath,"../Results/ResultsLatexTable.txt")
 text_file_results = open(FullPathResults, "w")
 print(" \\\\\n".join([" & ".join(map(str, line)) for line in CombinedTable]), file=text_file_results)
 text_file_results.close()
 
-#write table2 in latex format
+# write table2 in latex format
 FullPathResults = os.path.join(MyPath, "../Results/ClassificationResultsLatexTable.txt")
 text_file_results = open(FullPathResults, "w")
-ClassificationResultsTable=[]
+ClassificationResultsTable = []
 TotalNumMeasures = 2864
 
 TP = len(TotalCommonPacs)
@@ -108,15 +107,15 @@ Accuracy = (TP+TN)/(TP+TN+FP+FN)
 Specificity = TN/(FP+TN)
 
 ClassificationResultsTable.append(["Total Measures Analyzed", TotalNumMeasures])
-ClassificationResultsTable.append([f"PACs Detected",f"{TP} out of {len(TotalSears)}"])
-ClassificationResultsTable.append(["TP",TP])
-ClassificationResultsTable.append(["FP",FP])
-ClassificationResultsTable.append(["TN",TN])
-ClassificationResultsTable.append(["FN",FN])
-ClassificationResultsTable.append(["Precision" , "{0:0.2f}".format(Precision)])
-ClassificationResultsTable.append(["Recall" , "{0:0.2f}".format(Recall)])
-ClassificationResultsTable.append(["Accuracy" , "{0:0.2f}".format(Accuracy)])
-ClassificationResultsTable.append(["Specificity" , "{0:0.2f}".format(Specificity)])
+ClassificationResultsTable.append([f"{CadenceString} Detected:", f"{TP} out of {len(TotalSears)}"])
+ClassificationResultsTable.append(["TP", TP])
+ClassificationResultsTable.append(["FP", FP])
+ClassificationResultsTable.append(["TN", TN])
+ClassificationResultsTable.append(["FN", FN])
+ClassificationResultsTable.append(["Precision", "{0:0.2f}".format(Precision)])
+ClassificationResultsTable.append(["Recall", "{0:0.2f}".format(Recall)])
+ClassificationResultsTable.append(["Accuracy", "{0:0.2f}".format(Accuracy)])
+ClassificationResultsTable.append(["Specificity", "{0:0.2f}".format(Specificity)])
 
 print(" \\\\\n".join([" & ".join(map(str, line)) for line in ClassificationResultsTable]), file=text_file_results)
 text_file_results.close()
