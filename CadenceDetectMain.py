@@ -19,76 +19,93 @@ DownloadsPath = '/Users/matanba/Downloads/'
 #file = 'haydn_string_quartet_33_2_(c)harfesoft.xml'
 #file = 'mozart_chamber_music_502_(c)harfesoft.xml' - bad file ?
 
-SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
+SearsHaydnPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
+DCMLabMozartPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml'
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
-XMLFileEnding = "haydn_op064_no03_mv01.xml"
 XMLFileEnding = ".xml"
-#===for testing a single file
-#SearsPath = "/Users/matanba/Downloads/"
-#XMLFileEnding = "Piano_Sonata_No.11_in_A_major-K.331W._A._Mozart.xml"
+#XMLFileEnding = "K545-2.mxl"
 
+InputFilePath = SearsHaydnPath
+OutputFilePath = MyPath
+
+#===for testing a single file
+#TestPath = "/Users/matanba/Dropbox/PhD/CadencesResearch/TestData/"
+#XMLFileEnding = "son333_1.mxl"
+#InputFilePath = TestPath
+#OutputFilePath = os.path.join(InputFilePath, "StateMachineData/")
+
+os.makedirs(OutputFilePath, exist_ok=True)
 TextFileEnding = ".txt"
 
-#settings
+# Global Settings
 ReadKeyFromSears = 1
+RunKeyDetection = 0
 DoParallelProcessing = 1
-
+OnlyGetNumMeasures = False
+KeyDetectionBlockSize = 8  # in measures
+KeyDetectionForgetFactor = 0.9
 
 import os
 import time
 import multiprocessing as mp
 
-def findCadencesInFile(file):
-    #for file in sorted(os.listdir(SearsPath)):
+def findCadencesInFile(file, only_get_num_measures = False):
     if file.endswith(XMLFileEnding):
-        #define path
-        FullPath = os.path.join(SearsPath, file)
+        # define path
+        FullPath = os.path.join(InputFilePath, file)
         print(f"Analyzing {FullPath}")
-        #init detector class
+        # init detector class
         CD = CadenceDetector()
-        #load file to detector
-        CD.loadFile(FullPath)
-        #set files
-        CD.setFileName(file)
-        CD.setWritePath(MyPath)
-        #CD.loadMusic21Corpus(music21file)
-        #define params
-        blockSize = 4 #in measures
-        overlap = 1/blockSize #ratio from block size
-        #detect key per measure
-        if ReadKeyFromSears:
-            CD.getKeyPerMeasureFromSearsFile(FullPath)
+        if only_get_num_measures:
+            CD.loadFileAndGetMeasures(FullPath)
         else:
-            CD.detectKeyPerMeasure(blockSize,overlap)
-        #write To file
-        CD.writeKeyPerMeasureToFile()
-        #read from file
-        CD.readKeyPerMeasureFromFile()
-        #detect cadences per key
-        CD.detectCadences()
-        try:
-            CD.writeAnalyzedFile()
-        except:
-            print('error: could not write file')
+            # load file to detector
+            CD.loadFile(FullPath)
+            # set files
+            CD.setFileName(file)
+            CD.setWritePath(OutputFilePath)
+            # CD.loadMusic21Corpus(music21file)
+            overlap = 1 / KeyDetectionBlockSize  # ratio from block size, this creates an step size of 1 measure
+            # detect key per measure
+            if ReadKeyFromSears:
+                CD.getKeyPerMeasureFromSearsFile(FullPath)
+                CD.writeKeyPerMeasureToFile()
+            elif RunKeyDetection:
+                CD.detectKeyPerMeasure3(KeyDetectionBlockSize, overlap, KeyDetectionForgetFactor)
+                # write To file
+                CD.writeKeyPerMeasureToFile()
+            # read from file
+            CD.readKeyPerMeasureFromFile()
+            # detect cadences per key
+            CD.detectCadences()
+            try:
+                CD.writeAnalyzedFile()
+            except:
+                print('error: could not write file')
+        return CD.NumMeasures
         #display
         #CD.displayFull()
 
 
+if __name__ == '__main__':
+    fileList = sorted(os.listdir(InputFilePath))
+    start = time.time()
+    if DoParallelProcessing:
+        print("Parallel Processing On")
+        print("Number of processors: ", mp.cpu_count())
+        pool = mp.Pool(mp.cpu_count())
+        pool.map_async(findCadencesInFile, [file for file in fileList]).get()
+        pool.close()
+    else:
+        print("Parallel Processing Off")
+        total_num_measures = 0
+        for file in fileList:
+            curr_num_measures = findCadencesInFile(file, only_get_num_measures=OnlyGetNumMeasures)
+            if curr_num_measures is not None:
+                total_num_measures = total_num_measures + curr_num_measures
+        print("Total Num Measures:", total_num_measures)
 
-fileList = sorted(os.listdir(SearsPath))
-start = time.time()
-if DoParallelProcessing:
-    print("Parallel Processing On")
-    print("Number of processors: ", mp.cpu_count())
-    pool = mp.Pool(mp.cpu_count())
-    pool.map_async(findCadencesInFile, [file for file in fileList]).get()
-    pool.close()
-else:
-    print("Parallel Processing Off")
-    for file in fileList:
-        findCadencesInFile(file)
-
-end = time.time()
-total_time = end - start
-print("Elapsed time",total_time/60,"minutes")
+    end = time.time()
+    total_time = end - start
+    print("Elapsed time", total_time/60, "minutes")

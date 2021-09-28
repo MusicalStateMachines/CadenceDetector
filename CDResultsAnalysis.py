@@ -1,49 +1,80 @@
 import os
-SearsPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
-FileEnding = ".txt"
-SearCadenceViolinMeasureIndex = 2
-MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
-MyCadenceMeasureIndex = 1
+class LabeledData:
+    def __init__(self):
+        self.DataPath = []
+        self.FileEnding = []
+        self.PACMeasureIndex = []
+        self.RowSearchString = []
+        self.TotalNumMeasures = []
+
+
+SearsData = LabeledData()
+SearsData.DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
+SearsData.FileEnding = ".txt"
+SearsData.PACMeasureIndex = 2
+SearsData.RowSearchString = "Cadence Category"
+SearsData.TotalNumMeasures = 2864
+
+DCMData = LabeledData()
+DCMData.DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/cadences'
+DCMData.FileEnding = '.tsv'
+DCMData.PACMeasureIndex = 1
+DCMData.RowSearchString = "cadence"
+DCMData.TotalNumMeasures = 12360
+
+# set which database to compare to
+TestData = SearsData
+
+# set state machine data
+StateMachineData = LabeledData()
+StateMachineData.DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
+StateMachineData.PACMeasureIndex = 1
+if TestData == DCMData:
+    StateMachineData.FileEnding = "_mxl_Analyzed.txt"
+elif TestData == SearsData:
+    StateMachineData.FileEnding = "_xml_Analyzed.txt"
+
+
 CombinedTable = []
 CombinedTableExtended = []
-TotalSears = []
-TotalMyCadences = []
+TotalTest = []
+TotalStateMachine = []
 TotalCommonPacs = []
 TotalFP = []
 TotalFN = []
 CadenceString = "PAC"
 
-for SearsFile in sorted(os.listdir(SearsPath)):
-    if SearsFile.endswith(FileEnding):
-        # define path for Sears
-        FullPath = os.path.join(SearsPath, SearsFile)
+for LabeledFile in sorted(os.listdir(TestData.DataPath)):
+    if LabeledFile.endswith(TestData.FileEnding):
+        # define path for Test Data
+        FullPath = os.path.join(TestData.DataPath, LabeledFile)
         print(f"Analyzing {FullPath}")
 
-        CurrSearsCadences = []
-        CurrMyCadences = []
+        CurrTestCadences = []
+        CurrStateMachineCadences = []
         CurrFalsePositives = []
         CurrFalseNegatives = []
 
-        # find sears cadences
+        # find test cadences
         with open(FullPath, 'r') as f:
             lines = f.readlines()
 
             FoundRow = 0
             for line in lines:
                 if FoundRow == 0:
-                    if "Cadence Category" in line:
+                    if TestData.RowSearchString in line:
                         FoundRow = 1
                         continue
                 else:
                     if CadenceString in line:
                         elements = line.strip().split("\t")
                         print(elements, len(elements))
-                        CurrSearsCadences.append(str(elements[SearCadenceViolinMeasureIndex]))
+                        CurrTestCadences.append(str(elements[TestData.PACMeasureIndex]))
                         # print(line, file=text_file_reduced)
 
         # find equivalent in MyPath
-        MyFile = SearsFile.replace(".txt", "_xml_Analyzed.txt")
-        MyFullPath = os.path.join(MyPath, MyFile)
+        MyFile = LabeledFile.replace(TestData.FileEnding, StateMachineData.FileEnding)
+        MyFullPath = os.path.join(StateMachineData.DataPath, MyFile)
 
         with open(MyFullPath,'r') as f:
             lines = f.readlines()
@@ -51,22 +82,22 @@ for SearsFile in sorted(os.listdir(SearsPath)):
                 if CadenceString in line:
                     elements = line.strip().split(" ")
                     print(elements, len(elements))
-                    CurrMyCadences.append(str(elements[MyCadenceMeasureIndex]))
+                    CurrStateMachineCadences.append(str(elements[StateMachineData.PACMeasureIndex]))
 
-        FileNameForText = SearsFile.replace(".txt", " ")
+        FileNameForText = LabeledFile.replace(".txt", " ")
         FileNameForText = FileNameForText.replace("_", " ")
 
-        for item in list(set(CurrSearsCadences).intersection(CurrMyCadences)):
+        for item in list(set(CurrTestCadences).intersection(CurrStateMachineCadences)):
             TotalCommonPacs.append(item)
 
-        for item in CurrSearsCadences:
-            TotalSears.append(CurrSearsCadences)
+        for item in CurrTestCadences:
+            TotalTest.append(CurrTestCadences)
 
-        for item in CurrMyCadences:
-            TotalMyCadences.append(CurrMyCadences)
+        for item in CurrStateMachineCadences:
+            TotalStateMachine.append(CurrStateMachineCadences)
 
-        for item in list(set(CurrMyCadences).symmetric_difference(CurrSearsCadences)):
-            if item in CurrMyCadences:
+        for item in list(set(CurrStateMachineCadences).symmetric_difference(CurrTestCadences)):
+            if item in CurrStateMachineCadences:
                 CurrFalsePositives.append(item)
             else:
                 CurrFalseNegatives.append(item)
@@ -77,28 +108,28 @@ for SearsFile in sorted(os.listdir(SearsPath)):
         for item in CurrFalseNegatives:
             TotalFN.append(CurrFalseNegatives)
 
-        CombinedTable.append([FileNameForText, ",".join(CurrSearsCadences), ",".join(CurrMyCadences)])
-        CombinedTableExtended.append([FileNameForText, ",".join(CurrSearsCadences), ",".join(CurrMyCadences),
+        CombinedTable.append([FileNameForText, ",".join(CurrTestCadences), ",".join(CurrStateMachineCadences)])
+        CombinedTableExtended.append([FileNameForText, ",".join(CurrTestCadences), ",".join(CurrStateMachineCadences),
                                       ",".join(CurrFalsePositives), ",".join(CurrFalseNegatives)])
 
 for row in CombinedTableExtended:
     print(row)
 
 # write table1 in latex format
-FullPathResults = os.path.join(MyPath,"../Results/ResultsLatexTable.txt")
+FullPathResults = os.path.join(StateMachineData.DataPath,"../Results/ResultsLatexTable.txt")
 text_file_results = open(FullPathResults, "w")
 print(" \\\\\n".join([" & ".join(map(str, line)) for line in CombinedTable]), file=text_file_results)
 text_file_results.close()
 
 # write table2 in latex format
-FullPathResults = os.path.join(MyPath, "../Results/ClassificationResultsLatexTable.txt")
+FullPathResults = os.path.join(StateMachineData.DataPath, "../Results/ClassificationResultsLatexTable.txt")
 text_file_results = open(FullPathResults, "w")
 ClassificationResultsTable = []
-TotalNumMeasures = 2864
+
 
 TP = len(TotalCommonPacs)
 FP = len(TotalFP)
-TN = TotalNumMeasures - len(TotalSears) - FP
+TN = TestData.TotalNumMeasures - len(TotalTest) - FP
 FN = len(TotalFN)
 
 Precision = TP/(FP+TP)
@@ -106,8 +137,8 @@ Recall = TP/(FN+TP)
 Accuracy = (TP+TN)/(TP+TN+FP+FN)
 Specificity = TN/(FP+TN)
 
-ClassificationResultsTable.append(["Total Measures Analyzed", TotalNumMeasures])
-ClassificationResultsTable.append([f"{CadenceString} Detected:", f"{TP} out of {len(TotalSears)}"])
+ClassificationResultsTable.append(["Total Measures Analyzed", TestData.TotalNumMeasures])
+ClassificationResultsTable.append([f"{CadenceString} Detected:", f"{TP} out of {len(TotalTest)}"])
 ClassificationResultsTable.append(["TP", TP])
 ClassificationResultsTable.append(["FP", FP])
 ClassificationResultsTable.append(["TN", TN])

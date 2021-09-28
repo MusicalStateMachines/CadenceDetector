@@ -7,6 +7,7 @@ import numpy
 import pickle
 import enum
 import copy
+import sys
 
 class CadenceDetector:
     HarmonicStateMachine = CDStateMachine()
@@ -14,6 +15,7 @@ class CadenceDetector:
     ChordStream = []
     KeyPerMeasure = []
     NumMeasures = 0
+    NumParts = 0
     blockSize = 0
     overlap = 0
     fileName = 0
@@ -24,6 +26,7 @@ class CadenceDetector:
         self.HarmonicStateMachine = CDStateMachine()
         self.NoteStream = []
         self.NoteStreamRestless = []
+        self.NoteStreamReduced = []
         self.ChordStream = []
         self.ChordStreamRestless = []
         self.KeyPerMeasure = []
@@ -36,12 +39,19 @@ class CadenceDetector:
         self.NoteStream = corpus.parse(fileString)
         self.analyze()
 
+    def loadFileAndGetMeasures(self, fileString):
+        print("Loading score...")
+        self.NoteStream = converter.parse(fileString)
+        self.NumMeasures = len(self.NoteStream.recurse().getElementsByClass('Measure'))
+        self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
+
     def loadFile(self,fileString):
         print("Loading score...")
         self.NoteStream = converter.parse(fileString)
         self.analyze()
 
     def analyze(self):
+        self.removeChordSymbolsInNoteStream()
         self.removePickupMeasure()
         try:
             self.ChordStream = self.NoteStream.chordify(addPartIdAsGroup=True,removeRedundantPitches=False)
@@ -53,7 +63,7 @@ class CadenceDetector:
 
 
         self.NumMeasures = len(self.ChordStream.recurse().getElementsByClass('Measure'))
-        self.NumMeasures = min(self.NumMeasures,MaxNumMeasures)
+        self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
         self.NoteStreamRestless = copy.deepcopy(self.NoteStream)  #create new list so as not to alter the original stream
         self.replaceBassRestsWithPrevs()
         self.addMyLablesToParts()
@@ -75,22 +85,46 @@ class CadenceDetector:
     def addMyLablesToParts(self):
         p = 0
         for curr_part in self.NoteStreamRestless.recurse().getElementsByClass(stream.Part):
-            if p == 0:  # assuming soprano is p=0
+            if p == 0:  # assuming soprano is first and bass last, remaining parts are not accessed individually
                 curr_part.id = 'MySoprano'
+            elif p == self.NumParts-1:
+                curr_part.id = 'MyBasso'
             elif p == 1: # assuming alto is p=1
                 curr_part.id = 'MyAlto'
             elif p == 2: # assuming tenor is p=2
                 curr_part.id = 'MyTenor'
-            elif p == 3: # assuming basso is p=2
-                curr_part.id = 'MyBasso'
             p=p+1
 
 
-    def replaceBassRestsWithPrevs(self):
+    def tryIsChord(x, self):
+        try:
+            return x.isChord
+        except:
+            return False
 
+    def removeChordSymbolsInNoteStream(self):
+        objects_to_remove = []
+        for curr_note in self.NoteStream.recurse().getElementsByClass('ChordSymbol'):
+            if curr_note.isChord:
+                objects_to_remove.append(curr_note)
+
+        self.NoteStream.remove(objects_to_remove,recurse=True)
+
+        chords_present = False
+        for curr_note in self.NoteStream.recurse().getElementsByClass(note.GeneralNote):
+            if curr_note.isChord:
+                chords_present = True
+                break
+        if not chords_present:
+             print('No more chords in note stream!')
+
+
+    def replaceBassRestsWithPrevs(self):
+        parts = self.NoteStreamRestless.recurse().getElementsByClass(stream.Part)
+        self.NumParts = len(parts)
         p=0
-        for curr_part in self.NoteStreamRestless.recurse().getElementsByClass(stream.Part):
-            if not p==3:#bass only, assuming bass is p=3
+        for curr_part in parts:
+            if not p==self.NumParts-1:#bass only, assuming bass is last part
                 p=p+1
                 continue
             prev_note = []
@@ -101,15 +135,18 @@ class CadenceDetector:
                 for curr_item in curr_measure.recurse().getElementsByClass(note.GeneralNote):
                     if prev_note:
                         if curr_item.isRest:
-                            noteFromRest = self.noteFromRestWithPitch(curr_item, prev_note.pitch)
-                            measure_modifcations_list.append([curr_item,noteFromRest])
+                            if prev_note.isChord:
+                                note_from_rest = self.noteFromRestWithPitch(curr_item, prev_note.pitches[0])
+                            else:
+                                note_from_rest = self.noteFromRestWithPitch(curr_item, prev_note.pitch)
+                            measure_modifcations_list.append([curr_item, note_from_rest])
                         else:
                             prev_note = curr_item
                     elif not curr_item.isRest:
                         prev_note = curr_item
                 #make modifications to measure
                 for curr_mod in measure_modifcations_list:
-                    curr_measure.replace(curr_mod[0],curr_mod[1])
+                    curr_measure.replace(curr_mod[0], curr_mod[1])
 
 
         #self.NoteStreamRestless.show()
@@ -143,16 +180,17 @@ class CadenceDetector:
             StopMeasure = min(currBlock + self.blockSize - 1,self.NumMeasures)
             if StopMeasure<currBlock:
                 break
-            CurrMeasures = self.ChordStreamRestless.measures(currBlock, StopMeasure)
+            CurrMeasures = self.NoteStream.measures(currBlock, StopMeasure)
             #print(currBlock, StopMeasure)
             Key = CurrMeasures.analyze('key')
+            AllInterpretations = Key.alternateInterpretations.append(Key)
             #print(Key)
             #print(Key.correlationCoefficient)
             CorrCoefs.append(Key.correlationCoefficient)
             iMeasure = currBlock-1
             for thisMeasure in CurrMeasures:
                 #adding the keys as a multiple of the correlation coef to get more accurate statistics
-                for nCounts in range(1,math.ceil(Key.correlationCoefficient*10)):
+                for nCounts in range(1, math.ceil(Key.correlationCoefficient*10)):
                     if iMeasure >= len(self.OptionalKeysPerMeasure):
                         self.OptionalKeysPerMeasure.append([Key])#if this is the first key anlaysis realted to this measure, append it as new list
                     else:
@@ -166,13 +204,77 @@ class CadenceDetector:
         print("Mean CorrCoef: ",numpy.mean(CorrCoefs))
         #loop thru optional keys per measure and determine key by highset distribution
 
-        for currMeasure in range(0,self.NumMeasures):
+        for currMeasure in range(0, self.NumMeasures):
             currOptionalKeys = self.OptionalKeysPerMeasure[currMeasure]
             key_counts = Counter(currOptionalKeys)
             mostCommonKey = key_counts.most_common(1)[0][0]
             self.KeyPerMeasure.append(mostCommonKey)
             ####====debug with constant key
             #self.KeyPerMeasure.append(key.Key('D'))#akjshdgakdshg  - temp debug set constant key
+
+
+    def detectKeyPerMeasure2(self, blockSize,tc):
+        print("Num Measures:", self.NumMeasures)
+        self.blockSize = blockSize
+        ka = analysis.floatingKey.KeyAnalyzer(self.NoteStream)
+        ka.windowSize = self.blockSize
+        ka.run()
+        my_smoothed_interp = []
+        for m in range(1, ka.numMeasures):
+            if m == 1:
+                curr_smooth = ka.getInterpretationByMeasure(m)
+            else:
+                curr_smooth = {}
+                curr_interpretation = ka.getInterpretationByMeasure(m)
+                prev_smooth = my_smoothed_interp[m-2]  # measures start from 1, indices start from zero, hence the -2
+                # smoothing per key
+                for curr_key in curr_interpretation.keys():
+                    curr_smooth[curr_key] = tc * prev_smooth[curr_key] + (1-tc) * curr_interpretation[curr_key]
+            my_smoothed_interp.append(curr_smooth)
+            # finding maximum per measure after smoothing
+            max_key = max(curr_smooth, key=curr_smooth.get)
+            self.KeyPerMeasure.append(key.Key(max_key))
+
+        # this is to overcome the last measure problem in music21
+        self.KeyPerMeasure.append(self.KeyPerMeasure[-1])
+
+
+    def detectKeyPerMeasure3(self, blockSize, overlap, tc):
+        print("Detecting key per block...")
+        self.blockSize = blockSize
+        self.overlap = overlap
+        print("Num Measures:", self.NumMeasures)
+        smoothed_corr_coefs = {}
+        for currBlock in range(1, self.NumMeasures+1):
+            StopMeasure = min(currBlock + self.blockSize - 1, self.NumMeasures)
+            CurrMeasures = self.NoteStream.measures(currBlock, StopMeasure)
+            #print(currBlock, StopMeasure)
+            try:
+                Key = CurrMeasures.analyze('key')
+                Key.alternateInterpretations.append(Key)
+                max_val = 0
+                for curr_key in Key.alternateInterpretations:
+                    short_name = curr_key.tonicPitchNameWithCase
+                    if short_name not in smoothed_corr_coefs:  # no smoothing on first measure
+                        smoothed_val = curr_key.correlationCoefficient
+                    else:  # append with smoothing
+                        smoothed_val = tc * smoothed_corr_coefs[short_name][-1] + (1-tc) * curr_key.correlationCoefficient
+                    smoothed_corr_coefs.setdefault(short_name, []).append(smoothed_val)
+                    if smoothed_val > max_val:
+                        max_val = smoothed_val
+                        max_key = curr_key
+            except:
+                print("Key detection error:", sys.exc_info()[0])
+                print("Maintaining previous key")
+                max_key = self.KeyPerMeasure[-1]
+            self.KeyPerMeasure.append(max_key)
+
+        # left shift everything by N measures, for per key change cadences - TBD, shift key using cadence detection
+        n_shift = 0
+        for i in range(0, len(self.KeyPerMeasure)-n_shift):
+            self.KeyPerMeasure[i] = self.KeyPerMeasure[i+n_shift]
+
+        #print(currBlock, max_key)
 
 
     def writeKeyPerMeasureToFile(self):
@@ -267,7 +369,7 @@ class CadenceDetector:
             CurrMeasuresRestless= self.ChordStreamRestless.measures(currMeasureIndex+1,currMeasureIndex+1)#measures start with 1
             CurrMeasures = self.ChordStream.measures(currMeasureIndex + 1,currMeasureIndex + 1)  # measures start with 1
             #debug per measure
-            if currMeasureIndex==30:
+            if currMeasureIndex==0:
                 bla=0
 
             LyricPerBeat = []
@@ -305,6 +407,7 @@ class CadenceDetector:
                     print(f"{currMeasureIndex + 1 - self.hasPickupMeasure} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileOffsets)
 
 
+
                 # save transitions to file regardless of Lyrics
                 # if prevState != self.HarmonicStateMachine.getCadentialOutput().value:
                 #    print(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileTransitions)
@@ -315,14 +418,14 @@ class CadenceDetector:
             Parts = CurrMeasuresNotes.getElementsByClass(stream.Part)
             for thisLyric in LyricPerBeat:
                 found = 0
-
-                for thisNote in Parts[-1].flat.notesAndRests:  # adding lyric only to last part assuming its the bass line
-                    if thisNote.beat == thisLyric[0]:
-                        thisNote.lyric = thisLyric[1]
-                        found = 1
+                for index in range(0, self.NumParts):
+                    for thisNote in Parts[-1-index].flat.notesAndRests:  # adding lyric from last part up, assuming its the bass line
+                        if thisNote.beat == thisLyric[0]:
+                            thisNote.lyric = thisLyric[1]
+                            found = 1
+                            break
+                    if found == 1:
                         break
-                if found == 1:
-                    continue
 
         text_file.close()
         text_fileOffsets.close()

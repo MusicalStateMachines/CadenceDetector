@@ -2,9 +2,9 @@ from music21 import *
 from enum import Enum
 
 #consts
-MaxNumMeasures = 200
-MinInitialMeasures = 3
-MinPostCadenceMeasures = 1
+MaxNumMeasures = 300
+MinInitialMeasures = 0
+MinPostCadenceMeasures = 0
 
 # class MyChord(chord.Chord):
 #     def __init__(self, Chord, Key):
