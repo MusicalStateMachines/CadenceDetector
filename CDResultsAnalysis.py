@@ -6,6 +6,7 @@ class LabeledData:
         self.PACMeasureIndex = []
         self.RowSearchString = []
         self.TotalNumMeasures = []
+        self.Label = []
 
 
 SearsData = LabeledData()
@@ -14,6 +15,7 @@ SearsData.FileEnding = ".txt"
 SearsData.PACMeasureIndex = 2
 SearsData.RowSearchString = "Cadence Category"
 SearsData.TotalNumMeasures = 2864
+SearsData.Label = "Sears_HaydnQuartets"
 
 DCMData = LabeledData()
 DCMData.DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/cadences'
@@ -21,6 +23,7 @@ DCMData.FileEnding = '.tsv'
 DCMData.PACMeasureIndex = 1
 DCMData.RowSearchString = "cadence"
 DCMData.TotalNumMeasures = 12360
+DCMData.Label = "DCM_MozartSonatas"
 
 # set which database to compare to
 TestData = SearsData
@@ -29,10 +32,7 @@ TestData = SearsData
 StateMachineData = LabeledData()
 StateMachineData.DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 StateMachineData.PACMeasureIndex = 1
-if TestData == DCMData:
-    StateMachineData.FileEnding = "_mxl_Analyzed.txt"
-elif TestData == SearsData:
-    StateMachineData.FileEnding = "_xml_Analyzed.txt"
+StateMachineData.FileEnding = "_xml_Analyzed.txt"
 
 
 CombinedTable = []
@@ -116,13 +116,13 @@ for row in CombinedTableExtended:
     print(row)
 
 # write table1 in latex format
-FullPathResults = os.path.join(StateMachineData.DataPath,"../Results/ResultsLatexTable.txt")
+FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_FullClassificationsLatexTable.txt")
 text_file_results = open(FullPathResults, "w")
 print(" \\\\\n".join([" & ".join(map(str, line)) for line in CombinedTable]), file=text_file_results)
 text_file_results.close()
 
 # write table2 in latex format
-FullPathResults = os.path.join(StateMachineData.DataPath, "../Results/ClassificationResultsLatexTable.txt")
+FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_ScoresLatexTable.txt")
 text_file_results = open(FullPathResults, "w")
 ClassificationResultsTable = []
 

@@ -24,12 +24,11 @@ DCMLabMozartPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_pi
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
 XMLFileEnding = ".xml"
-#XMLFileEnding = "K545-2.mxl"
 
 InputFilePath = SearsHaydnPath
 OutputFilePath = MyPath
 
-#===for testing a single file
+#===for testing a single file not in database
 #TestPath = "/Users/matanba/Dropbox/PhD/CadencesResearch/TestData/"
 #XMLFileEnding = "son333_1.mxl"
 #InputFilePath = TestPath
@@ -43,7 +42,7 @@ ReadKeyFromSears = 1
 RunKeyDetection = 0
 DoParallelProcessing = 1
 OnlyGetNumMeasures = False
-KeyDetectionBlockSize = 8  # in measures
+KeyDetectionBlockSize = 4  # in measures
 KeyDetectionForgetFactor = 0.9
 
 import os

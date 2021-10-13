@@ -1,5 +1,5 @@
 from CadenceDetectStateMachine import *
-from music21 import *
+import music21 as m21
 from collections import Counter
 import math
 import os
@@ -36,25 +36,26 @@ class CadenceDetector:
         self.overlap = 0
 
     def loadMusic21Corpus(self,fileString):
-        self.NoteStream = corpus.parse(fileString)
+        self.NoteStream = m21.corpus.parse(fileString)
         self.analyze()
 
     def loadFileAndGetMeasures(self, fileString):
         print("Loading score...")
-        self.NoteStream = converter.parse(fileString)
+        self.NoteStream = m21.converter.parse(fileString)
         self.NumMeasures = len(self.NoteStream.recurse().getElementsByClass('Measure'))
         self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
 
     def loadFile(self,fileString):
         print("Loading score...")
-        self.NoteStream = converter.parse(fileString)
+        self.NoteStream = m21.converter.parse(fileString)
         self.analyze()
 
     def analyze(self):
         self.removeChordSymbolsInNoteStream()
         self.removePickupMeasure()
+        self.addMyLablesToParts(self.NoteStream)
         try:
-            self.ChordStream = self.NoteStream.chordify(addPartIdAsGroup=True,removeRedundantPitches=False)
+            self.ChordStream = self.NoteStream.chordify(addPartIdAsGroup=True, removeRedundantPitches=False)
             self.HarmonicStateMachine.CheckBassPartFromChord = True
         except:
             print("Cannot add parts to chords!!")
@@ -66,9 +67,9 @@ class CadenceDetector:
         self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
         self.NoteStreamRestless = copy.deepcopy(self.NoteStream)  #create new list so as not to alter the original stream
         self.replaceBassRestsWithPrevs()
-        self.addMyLablesToParts()
+        self.addMyLablesToParts(self.NoteStreamRestless)
         if self.HarmonicStateMachine.CheckBassPartFromChord==True:
-            self.ChordStreamRestless = self.NoteStreamRestless.chordify(addPartIdAsGroup=True,removeRedundantPitches=False)
+            self.ChordStreamRestless = self.NoteStreamRestless.chordify(addPartIdAsGroup=True, removeRedundantPitches=False)
         else:
             self.ChordStreamRestless = self.NoteStreamRestless.chordify(removeRedundantPitches=False)
 
@@ -82,19 +83,14 @@ class CadenceDetector:
                 print("Pickup Cancelled")
                 break
 
-    def addMyLablesToParts(self):
-        p = 0
-        for curr_part in self.NoteStreamRestless.recurse().getElementsByClass(stream.Part):
-            if p == 0:  # assuming soprano is first and bass last, remaining parts are not accessed individually
-                curr_part.id = 'MySoprano'
-            elif p == self.NumParts-1:
-                curr_part.id = 'MyBasso'
-            elif p == 1: # assuming alto is p=1
-                curr_part.id = 'MyAlto'
-            elif p == 2: # assuming tenor is p=2
-                curr_part.id = 'MyTenor'
-            p=p+1
-
+    def addMyLablesToParts(self, note_stream):
+        parts = note_stream.recurse().getElementsByClass(m21.stream.Part)
+        num_parts = len(parts)
+        # assuming soprano is first and bass last, remaining parts are not accessed individually
+        part_names = ['MySoprano', 'MyAlto', 'MyTenor', 'MyBasso']
+        part_names[num_parts-1] = 'MyBasso'
+        for i, p in enumerate(parts):
+            p.id = part_names[i]
 
     def tryIsChord(x, self):
         try:
@@ -120,7 +116,7 @@ class CadenceDetector:
 
 
     def replaceBassRestsWithPrevs(self):
-        parts = self.NoteStreamRestless.recurse().getElementsByClass(stream.Part)
+        parts = self.NoteStreamRestless.recurse().getElementsByClass(m21.stream.Part)
         self.NumParts = len(parts)
         p=0
         for curr_part in parts:
@@ -128,11 +124,11 @@ class CadenceDetector:
                 p=p+1
                 continue
             prev_note = []
-            for curr_measure in curr_part.recurse().getElementsByClass(stream.Measure):
-                prev_note = []  # should we complete bass between measures ???
+            for curr_measure in curr_part.recurse().getElementsByClass(m21.stream.Measure):
+                #prev_note = []  # should we complete bass between measures ???
                 measure_modifcations_list = []
                 #find rest and create modifications
-                for curr_item in curr_measure.recurse().getElementsByClass(note.GeneralNote):
+                for curr_item in curr_measure.recurse().getElementsByClass(m21.note.GeneralNote):
                     if prev_note:
                         if curr_item.isRest:
                             if prev_note.isChord:
@@ -152,14 +148,14 @@ class CadenceDetector:
         #self.NoteStreamRestless.show()
 
     def noteFromRestWithPitch(self,rest,pitch):
-        noteFromRest = note.Note(pitch)
+        noteFromRest = m21.note.Note(pitch)
         noteFromRest.duration = rest.duration
         noteFromRest.offset = rest.offset
         noteFromRest.quarterLength = rest.quarterLength
         return noteFromRest
 
     def chordFromRest(self,rest):
-        chordFromRest = chord.Chord([])
+        chordFromRest = m21.chord.Chord([])
         chordFromRest.duration = rest.duration
         chordFromRest.offset = rest.offset
         chordFromRest.quarterLength = rest.quarterLength
@@ -216,7 +212,7 @@ class CadenceDetector:
     def detectKeyPerMeasure2(self, blockSize,tc):
         print("Num Measures:", self.NumMeasures)
         self.blockSize = blockSize
-        ka = analysis.floatingKey.KeyAnalyzer(self.NoteStream)
+        ka = m21.analysis.floatingKey.KeyAnalyzer(self.NoteStream)
         ka.windowSize = self.blockSize
         ka.run()
         my_smoothed_interp = []
@@ -270,7 +266,7 @@ class CadenceDetector:
             self.KeyPerMeasure.append(max_key)
 
         # left shift everything by N measures, for per key change cadences - TBD, shift key using cadence detection
-        n_shift = 0
+        n_shift = 1
         for i in range(0, len(self.KeyPerMeasure)-n_shift):
             self.KeyPerMeasure[i] = self.KeyPerMeasure[i+n_shift]
 
@@ -349,7 +345,63 @@ class CadenceDetector:
     def mapSearsKeyToMusic21Key(self,SearStringKey, SearStringMode):
         Music21StringKey = SearStringKey.replace("b","-")
         Music21StringMode = SearStringMode.replace("M","m")
-        return key.Key(Music21StringKey,Music21StringMode)
+        return m21.key.Key(Music21StringKey,Music21StringMode)
+
+    def isUpwardArpeggioPattern(self, pitches, arp_len):
+        if len(pitches) < arp_len:
+            retVal = False
+        else:
+            retVal = True
+            if all(x.midi > pitches[0].midi for x in pitches[1:]):
+                prev_pitch = []
+                for p in pitches:
+                    if prev_pitch and (p.midi - prev_pitch.midi) < 3: #minor and major second disqualifies the arpeggio
+                        retVal = False
+                        break
+                    prev_pitch = p
+            else:
+                retVal = False
+        return retVal
+
+    def isAlbertiPattern(self, pitches):
+        retVal = False
+        if len(pitches) >= 4:
+            if all(x.midi > pitches[0].midi for x in pitches[1:]) and pitches[1].midi == pitches[3].midi:
+                retVal = True
+        return retVal
+
+    def extractBassLine(self, measure):
+        lowestPitches = []
+        for chord in measure:
+            if not chord.isRest:
+                lowestPitch = chord.sortFrequencyAscending().pitches[0]
+                lowestPitches.append(lowestPitch)
+            else:
+                lowestPitches.append(None)
+        return lowestPitches
+
+
+    def detectAlbertiBassInMeasure(self, measure):
+        #first exact bassline from chords
+        lowestPitches = self.extractBassLine(measure)
+        albertiBeats = [0]*len(measure)
+        for beat in range(0, len(measure), 4):
+            fourNotes = lowestPitches[beat:beat+4]
+            if None not in fourNotes:
+                isAlberti = self.isAlbertiPattern(fourNotes)
+                albertiBeats[beat:beat+4] = [isAlberti] * 4
+        return albertiBeats
+
+
+    def detectArpeggioBassInMeasure(self, measure, arp_len):
+        lowestPitches = self.extractBassLine(measure)
+        arpeggioBeats = [0]*len(measure)
+        for beat in range(0, len(measure), arp_len):
+            subsec = lowestPitches[beat:beat+arp_len]
+            if None not in subsec:
+                isArp = self.isUpwardArpeggioPattern(subsec, arp_len)
+                arpeggioBeats[beat:beat+arp_len] = [isArp] * arp_len
+        return arpeggioBeats
 
 
     def detectCadences(self):
@@ -368,19 +420,31 @@ class CadenceDetector:
             currKey = self.KeyPerMeasure[currMeasureIndex]#lists start with 0
             CurrMeasuresRestless= self.ChordStreamRestless.measures(currMeasureIndex+1,currMeasureIndex+1)#measures start with 1
             CurrMeasures = self.ChordStream.measures(currMeasureIndex + 1,currMeasureIndex + 1)  # measures start with 1
+            #check and update timesig
+            for timeSig in CurrMeasures.recurse().getElementsByClass(m21.meter.TimeSignature):
+                if timeSig != self.HarmonicStateMachine.CurrHarmonicState.TimeSig:
+                    self.HarmonicStateMachine.CurrHarmonicState.TimeSig = timeSig
+
+            if self.HarmonicStateMachine.CurrHarmonicState.TimeSig.ratioString in ['3/4', '6/8']:
+                AlbertiBeats = [0] * len(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'))
+                ArpeggioBeats = self.detectArpeggioBassInMeasure(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'), 3)
+            else:
+                AlbertiBeats = self.detectAlbertiBassInMeasure(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'))
+                ArpeggioBeats = self.detectArpeggioBassInMeasure(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'), 4)
+
             #debug per measure
-            if currMeasureIndex==0:
+            if currMeasureIndex==44:
                 bla=0
 
             LyricPerBeat = []
 
-            for thisChord,thisChordWithBassRests in zip(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'),CurrMeasures.recurse().getElementsByClass('GeneralNote')):
+            for thisChord,thisChordWithBassRests,alberti,arpeggio in zip(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'),CurrMeasures.recurse().getElementsByClass('GeneralNote'),AlbertiBeats, ArpeggioBeats):
 
                 if thisChord.isRest:
-                    self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, [], [], [])
+                    self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio)
                 else:
-                    rn = roman.romanNumeralFromChord(thisChord, currKey)
-                    self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, rn.scaleDegree,rn.inversion(), rn.figure)
+                    rn = m21.roman.romanNumeralFromChord(thisChord, currKey)
+                    self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, rn.scaleDegree, rn.inversion(), rn.figure, alberti, arpeggio)
 
                 if self.HarmonicStateMachine.getRevertLastPACAndReset() and len(LyricPerBeat)>0: #this limits PAC reversion to within measure
                     LastPACTuple = LyricPerBeat[-1]
@@ -402,10 +466,18 @@ class CadenceDetector:
             for LyricTuple in LyricPerBeat:
                 Lyric = LyricTuple[1]
                 if "PAC" in Lyric or "IAC" in Lyric or "HC" in Lyric or "PCC" in Lyric:
+                    if "PAC" in Lyric:
+                        CadString = "PAC"
+                    elif "IAC" in Lyric:
+                        CadString = "IAC"
+                    elif "HC" in Lyric:
+                        CadString = "HC"
+                    elif "PCC" in Lyric:
+                        CadString = "PCC"
+                    CadStringToNumMap = {"PAC": CDCadentialStates.PACArrival.value, "IAC": CDCadentialStates.IACArrival.value, "HC": CDCadentialStates.HCArrival.value, "PCC": CDCadentialStates.PCCArrival.value}
                     print('Measure ', currMeasureIndex + 1 - self.hasPickupMeasure, ' offset ', measuresSecondsMap[currMeasureIndex]['offsetSeconds'], " ", Lyric)
                     print(f"Measure: {currMeasureIndex + 1 - self.hasPickupMeasure} Offset: {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {Lyric}", file=text_file)
-                    print(f"{currMeasureIndex + 1 - self.hasPickupMeasure} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileOffsets)
-
+                    print(f"{currMeasureIndex + 1 - self.hasPickupMeasure} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {CadStringToNumMap[CadString]}", file=text_fileOffsets)
 
 
                 # save transitions to file regardless of Lyrics
