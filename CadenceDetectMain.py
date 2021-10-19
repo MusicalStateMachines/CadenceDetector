@@ -38,8 +38,9 @@ os.makedirs(OutputFilePath, exist_ok=True)
 TextFileEnding = ".txt"
 
 # Global Settings
-ReadKeyFromSears = 1
-RunKeyDetection = 0
+ReadKeyFromSears = 0
+RunKeyDetection = 1
+KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
 DoParallelProcessing = 1
 OnlyGetNumMeasures = False
 KeyDetectionBlockSize = 4  # in measures
@@ -56,6 +57,8 @@ def findCadencesInFile(file, only_get_num_measures = False):
         print(f"Analyzing {FullPath}")
         # init detector class
         CD = CadenceDetector()
+        CD.KeyDetectionMode = KeyDetectionMode
+        CD.KeyDetectionForgetFactor = KeyDetectionForgetFactor
         if only_get_num_measures:
             CD.loadFileAndGetMeasures(FullPath)
         else:
@@ -71,7 +74,7 @@ def findCadencesInFile(file, only_get_num_measures = False):
                 CD.getKeyPerMeasureFromSearsFile(FullPath)
                 CD.writeKeyPerMeasureToFile()
             elif RunKeyDetection:
-                CD.detectKeyPerMeasure3(KeyDetectionBlockSize, overlap, KeyDetectionForgetFactor)
+                CD.detectKeyPerMeasure4(KeyDetectionBlockSize, overlap)
                 # write To file
                 CD.writeKeyPerMeasureToFile()
             # read from file

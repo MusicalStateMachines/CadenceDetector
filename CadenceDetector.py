@@ -10,30 +10,31 @@ import copy
 import sys
 
 class CadenceDetector:
-    HarmonicStateMachine = CDStateMachine()
-    NoteStream = []
-    ChordStream = []
-    KeyPerMeasure = []
-    NumMeasures = 0
-    NumParts = 0
-    blockSize = 0
-    overlap = 0
-    fileName = 0
-    hasPickupMeasure = 0
-    WritePath = 0
-
     def __init__(self):
         self.HarmonicStateMachine = CDStateMachine()
+        self.HarmonicStateMachineChallenger = CDStateMachine()
         self.NoteStream = []
         self.NoteStreamRestless = []
         self.NoteStreamReduced = []
         self.ChordStream = []
         self.ChordStreamRestless = []
         self.KeyPerMeasure = []
+        self.InterpretationsPerMeasure = []
+        self.CurrSmoothedInterpretations = {}
+        #{'A': 0, 'B-': 0, 'B': 0, 'C': 0, 'C#': 0, 'D': 0,
+        #'E-': 0, 'E': 0, 'F': 0, 'F#': 0, 'G': 0, 'A-': 0,
+        #'a': 0, 'b-': 0, 'b': 0, 'c': 0, 'c#': 0, 'd': 0,
+        #'e-': 0, 'e': 0, 'f': 0, 'f#': 0, 'g': 0, 'a-': 0}
+        self.Top2Keys = []
         self.OptionalKeysPerMeasure = [[]]
         self.NumMeasures = 0
         self.blockSize = 0
         self.overlap = 0
+        self.fileName = 0
+        self.hasPickupMeasure = 0
+        self.WritePath = 0
+        self.KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothing
+        self.KeyDetectionForgetFactor = 0.9
 
     def loadMusic21Corpus(self,fileString):
         self.NoteStream = m21.corpus.parse(fileString)
@@ -57,10 +58,12 @@ class CadenceDetector:
         try:
             self.ChordStream = self.NoteStream.chordify(addPartIdAsGroup=True, removeRedundantPitches=False)
             self.HarmonicStateMachine.CheckBassPartFromChord = True
+            self.HarmonicStateMachineChallenger.CheckBassPartFromChord = True
         except:
             print("Cannot add parts to chords!!")
             self.ChordStream = self.NoteStream.chordify(removeRedundantPitches=False)
             self.HarmonicStateMachine.CheckBassPartFromChord = False
+            self.HarmonicStateMachineChallenger.CheckBassPartFromChord = False
 
 
         self.NumMeasures = len(self.ChordStream.recurse().getElementsByClass('Measure'))
@@ -208,7 +211,6 @@ class CadenceDetector:
             ####====debug with constant key
             #self.KeyPerMeasure.append(key.Key('D'))#akjshdgakdshg  - temp debug set constant key
 
-
     def detectKeyPerMeasure2(self, blockSize,tc):
         print("Num Measures:", self.NumMeasures)
         self.blockSize = blockSize
@@ -234,8 +236,7 @@ class CadenceDetector:
         # this is to overcome the last measure problem in music21
         self.KeyPerMeasure.append(self.KeyPerMeasure[-1])
 
-
-    def detectKeyPerMeasure3(self, blockSize, overlap, tc):
+    def detectKeyPerMeasure3(self, blockSize, overlap):
         print("Detecting key per block...")
         self.blockSize = blockSize
         self.overlap = overlap
@@ -254,8 +255,8 @@ class CadenceDetector:
                     if short_name not in smoothed_corr_coefs:  # no smoothing on first measure
                         smoothed_val = curr_key.correlationCoefficient
                     else:  # append with smoothing
-                        smoothed_val = tc * smoothed_corr_coefs[short_name][-1] + (1-tc) * curr_key.correlationCoefficient
-                    smoothed_corr_coefs.setdefault(short_name, []).append(smoothed_val)
+                        smoothed_val = self.KeyDetectionForgetFactor * smoothed_corr_coefs[short_name] + (1-self.KeyDetectionForgetFactor) * curr_key.correlationCoefficient
+                    smoothed_corr_coefs[short_name] = smoothed_val
                     if smoothed_val > max_val:
                         max_val = smoothed_val
                         max_key = curr_key
@@ -263,7 +264,15 @@ class CadenceDetector:
                 print("Key detection error:", sys.exc_info()[0])
                 print("Maintaining previous key")
                 max_key = self.KeyPerMeasure[-1]
+
             self.KeyPerMeasure.append(max_key)
+
+            #sort keys by values and return top 2
+            #Top2 = dict(sorted(smoothed_corr_coefs.items(), key=lambda item: item[1] , reverse = True)[:2])
+            #Top2Keys = list(Top2.keys())
+            #self.KeyPerMeasure.append(Top2Keys[0])
+            #self.KeyPerMeasure2.append(Top2Keys[1])
+
 
         # left shift everything by N measures, for per key change cadences - TBD, shift key using cadence detection
         n_shift = 1
@@ -271,6 +280,27 @@ class CadenceDetector:
             self.KeyPerMeasure[i] = self.KeyPerMeasure[i+n_shift]
 
         #print(currBlock, max_key)
+
+    def detectKeyPerMeasure4(self, blockSize, overlap):
+        print("Detecting key per block...")
+        self.blockSize = blockSize
+        self.overlap = overlap
+        print("Num Measures:", self.NumMeasures)
+        smoothed_corr_coefs = {}
+        for currBlock in range(1, self.NumMeasures+1):
+            StopMeasure = min(currBlock + self.blockSize - 1, self.NumMeasures)
+            CurrMeasures = self.NoteStream.measures(currBlock, StopMeasure)
+            #print(currBlock, StopMeasure)
+            try:
+                Key = CurrMeasures.analyze('key')
+                Key.alternateInterpretations.append(Key)
+                CurrInterpretations = Key.alternateInterpretations
+            except:
+                print("Key detection error:", sys.exc_info()[0])
+                print("Maintaining previous key")
+                CurrInterpretations = self.InterpretationsPerMeasure[-1]
+
+            self.InterpretationsPerMeasure.append(CurrInterpretations)
 
 
     def writeKeyPerMeasureToFile(self):
@@ -403,6 +433,25 @@ class CadenceDetector:
                 arpeggioBeats[beat:beat+arp_len] = [isArp] * arp_len
         return arpeggioBeats
 
+    def smoothKeyInterpretations(self, measureIndex):
+        Tc = 0.9
+        currInterpretations = self.InterpretationsPerMeasure[measureIndex]
+        for interpretation in currInterpretations:
+            corrCoef = interpretation.correlationCoefficient
+            keyString = interpretation.tonicPitchNameWithCase
+            if keyString not in self.CurrSmoothedInterpretations:
+                self.CurrSmoothedInterpretations[keyString] = corrCoef
+            currSmoothedVal = self.CurrSmoothedInterpretations[keyString]
+            currSmoothedVal = Tc * currSmoothedVal + (1-Tc) * corrCoef
+            self.CurrSmoothedInterpretations[keyString] = currSmoothedVal
+
+
+    def getTopNKeyInterpretations(self, N):
+        #now sort by value
+        SortedKeys = sorted(self.CurrSmoothedInterpretations.items(), key=lambda x: x[1], reverse=True)
+        TopNKeys = SortedKeys[:N]
+        return TopNKeys
+
 
     def detectCadences(self):
         print("Detecting cadences...")
@@ -417,13 +466,13 @@ class CadenceDetector:
         prevState = []
 
         for currMeasureIndex in range(0,self.NumMeasures):
-            currKey = self.KeyPerMeasure[currMeasureIndex]#lists start with 0
             CurrMeasuresRestless= self.ChordStreamRestless.measures(currMeasureIndex+1,currMeasureIndex+1)#measures start with 1
             CurrMeasures = self.ChordStream.measures(currMeasureIndex + 1,currMeasureIndex + 1)  # measures start with 1
             #check and update timesig
             for timeSig in CurrMeasures.recurse().getElementsByClass(m21.meter.TimeSignature):
                 if timeSig != self.HarmonicStateMachine.CurrHarmonicState.TimeSig:
                     self.HarmonicStateMachine.CurrHarmonicState.TimeSig = timeSig
+                    self.HarmonicStateMachineChallenger.CurrHarmonicState.TimeSig = timeSig
 
             if self.HarmonicStateMachine.CurrHarmonicState.TimeSig.ratioString in ['3/4', '6/8']:
                 AlbertiBeats = [0] * len(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'))
@@ -433,12 +482,27 @@ class CadenceDetector:
                 ArpeggioBeats = self.detectArpeggioBassInMeasure(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'), 4)
 
             #debug per measure
-            if currMeasureIndex==44:
+            if currMeasureIndex==11:
                 bla=0
 
             LyricPerBeat = []
 
-            for thisChord,thisChordWithBassRests,alberti,arpeggio in zip(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'),CurrMeasures.recurse().getElementsByClass('GeneralNote'),AlbertiBeats, ArpeggioBeats):
+            if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or\
+                    self.KeyDetectionMode==CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+                #smooth keys here, per measure (TBD - per chord?):
+                self.smoothKeyInterpretations(currMeasureIndex)
+                #sort and return top 2
+                self.Top2Keys = self.getTopNKeyInterpretations(2)
+            else:
+                currKey = self.KeyPerMeasure[currMeasureIndex]#lists start with 0
+
+            for thisChord, thisChordWithBassRests, alberti, arpeggio in zip(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'),CurrMeasures.recurse().getElementsByClass('GeneralNote'),AlbertiBeats, ArpeggioBeats):
+                if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or\
+                        self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+                    currKeyString = self.Top2Keys[0][0]
+                    currKey = m21.key.Key(currKeyString)
+                    challengerKeyString = self.Top2Keys[1][0]
+                    challengerKey = m21.key.Key(challengerKeyString)
 
                 if thisChord.isRest:
                     self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio)
@@ -446,15 +510,42 @@ class CadenceDetector:
                     rn = m21.roman.romanNumeralFromChord(thisChord, currKey)
                     self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, rn.scaleDegree, rn.inversion(), rn.figure, alberti, arpeggio)
 
+                if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or \
+                        self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+                    if thisChord.isRest:
+                        self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio)
+                    else:
+                        rn2 = m21.roman.romanNumeralFromChord(thisChord, challengerKey)
+                        self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, rn2.scaleDegree, rn2.inversion(), rn2.figure, alberti, arpeggio)
+
+
+                #TBD - should we handle this reversion in challenger?
                 if self.HarmonicStateMachine.getRevertLastPACAndReset() and len(LyricPerBeat)>0: #this limits PAC reversion to within measure
                     LastPACTuple = LyricPerBeat[-1]
                     UpdatedLyric = "IAC"
                     LyricPerBeat[-1] = [LastPACTuple[0], UpdatedLyric]
                     print("Reverting last PAC to IAC")
+
+
+                StateMachineForCadence = self.HarmonicStateMachine
+                # Cadence Sensitive Key Detection Mode
+                if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+                    # Challenger Check
+                    # if cadence happened in challenger key and not in main key
+                    if 'PAC' in self.HarmonicStateMachineChallenger.getCadentialOutputString() and \
+                            'PAC' not in self.HarmonicStateMachine.getCadentialOutputString():
+                        # force set smooth coef of challenger to 1 and use output of SM 2 as temporary output
+                        self.CurrSmoothedInterpretations[challengerKeyString] = 1
+                        # re-sort and return Top2Keys
+                        self.Top2Keys = self.getTopNKeyInterpretations(2)
+                        StateMachineForCadence = self.HarmonicStateMachineChallenger
+                        #self.HarmonicStateMachine.CurrCadentialState = CDCadentialStates.Idle
+                        print('Cadential Key Change!')
+
                 # debugging
                 # print(self.HarmonicStateMachine.getCadentialOutput().value)
                 # thisChord.lyric = str(rn.figure)
-                Lyric = self.HarmonicStateMachine.getCadentialOutputString()
+                Lyric = StateMachineForCadence.getCadentialOutputString()
                 if Lyric:   # only work on non-empty lyrics
                     thisChord.lyric = Lyric
                     LyricPerBeat.append([thisChord.beat,Lyric])

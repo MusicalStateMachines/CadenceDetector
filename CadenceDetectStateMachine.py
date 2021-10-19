@@ -2,28 +2,26 @@ from CadenceDetectData import *
 from music21 import *
 import copy
 
-class CDStateMachine:
-    PrevCadentialState = CDCadentialStates.Idle
-    PrevHarmonicState = []
-    CurrCadentialState = CDCadentialStates.Idle
-    CurrCadentialOutput = CDCadentialStates.Idle
-    CurrHarmonicState = CDHarmonicState([], chord.Chord(), chord.Chord(), 0, 0, 0, 0, 0, meter.TimeSignature())
-    ChangeFlagOneShot = 0
-    KeyChangeOneShot = 0
-    TriggerString = str("")
-    MeasureCounter = 0
-    PostCadenceMeasureCounter = MinPostCadenceMeasures
-    CheckBassPartFromChord = False
-    PACPending = False
-    RevertLastPAC = False
-    ChordOfLastCadence = 0
-    SopranoOfLastCadence = 0
-
-    def __int__(self):
+class CDStateMachine(object):
+    def __init__(self):
         # initiliaze with invalid states
+        self.PrevCadentialState = CDCadentialStates.Idle
         self.CurrCadentialState = CDCadentialStates.Idle
         self.CurrHarmonicState = CDHarmonicState([], [], [], 0, 0, 0, 0, 0, 0)
         self.PrevHarmonicState = self.CurrHarmonicState
+        self.CurrCadentialOutput = CDCadentialStates.Idle
+        self.CurrHarmonicState = CDHarmonicState([], chord.Chord(), chord.Chord(), 0, 0, 0, 0, 0, meter.TimeSignature())
+        self.ChangeFlagOneShot = 0
+        self.KeyChangeOneShot = 0
+        self.FirstKeyDetectionDone = 0
+        self.TriggerString = str("")
+        self.MeasureCounter = 0
+        self.PostCadenceMeasureCounter = MinPostCadenceMeasures
+        self.CheckBassPartFromChord = False
+        self.PACPending = False
+        self.RevertLastPAC = False
+        self.ChordOfLastCadence = 0
+        self.SopranoOfLastCadence = 0
 
     def updateHarmonicState(self, Key, Chord, ChordWithRests, ChordDegree, ChordInversion, ChordFigure, Alberti, Arpeggio):
 
@@ -200,6 +198,7 @@ class CDStateMachine:
             print('error: could not get beat strength. Returning 0')
         return retVal
 
+
     def updateCadentialState(self):
 
         curr_state = self.CurrCadentialState #set to temp variable for clean code
@@ -222,6 +221,9 @@ class CDStateMachine:
                     bassPitch = self.getBassFromChord(self.PrevHarmonicState.Chord)
                     if bassPitch and bassPitch.pitchClass == dominantPitchClass:
                         curr_state = CDCadentialStates.HCArrival
+            elif self.isSecondaryDominantLeadingTone():# or (self.CurrHarmonicState.Key.mode=='major' and self.isSecondaryDominantUpperLeadingTone()): #this can create false HCs, need to consider non-cadential chromatic situations
+                curr_state = CDCadentialStates.HCArrivalExpected
+
             elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio) and self.tryGetBeatStrength() < 0.5:
                 #if alberti and weak beat do nothing
                 curr_state = curr_state
@@ -274,7 +276,8 @@ class CDStateMachine:
                 # for the case where in IAC expected and dominant appears again, the back to Cad inevitable (TBD, separate these states)
                 if self.isDominantBass():
                     curr_state = CDCadentialStates.CadInevitable
-
+                elif self.isSecondaryDominantLeadingTone():# or (self.CurrHarmonicState.Key.mode=='major' and self.isSecondaryDominantUpperLeadingTone()): #this can create false HCs, need to consider non-cadential chromatic situations
+                    curr_state = CDCadentialStates.HCArrivalExpected
                 # meter - look for cadences on strong beat:
                 elif self.tryGetBeatStrength() >= 0.25:#cadence can only occur on strong beats (TBD - syncopa?)
                     # harmony  - chordal degree and bass analysis
@@ -535,8 +538,9 @@ class CDStateMachine:
                 Lyric = Lyric + self.TriggerString
 
 
-        if self.KeyChangeOneShot == 1:
+        if self.KeyChangeOneShot == 1 or self.FirstKeyDetectionDone == 0:
             Lyric = Lyric + str("\n") + str(self.CurrHarmonicState.Key)
+            self.FirstKeyDetectionDone = 1
 
         #debug arpeggios and alberti
         #if self.CurrHarmonicState.Alberti:

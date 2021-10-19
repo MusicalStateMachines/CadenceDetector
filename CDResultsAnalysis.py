@@ -1,4 +1,7 @@
 import os
+from datetime import datetime
+
+
 class LabeledData:
     def __init__(self):
         self.DataPath = []
@@ -115,14 +118,16 @@ for LabeledFile in sorted(os.listdir(TestData.DataPath)):
 for row in CombinedTableExtended:
     print(row)
 
+now = datetime.now()
+current_time = now.strftime("%Y_%m_%d_%H_%M_%S")
 # write table1 in latex format
-FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_FullClassificationsLatexTable.txt")
+FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_FullClassificationsLatexTable_{current_time}.txt")
 text_file_results = open(FullPathResults, "w")
 print(" \\\\\n".join([" & ".join(map(str, line)) for line in CombinedTable]), file=text_file_results)
 text_file_results.close()
 
 # write table2 in latex format
-FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_ScoresLatexTable.txt")
+FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_ScoresLatexTable_{current_time}.txt")
 text_file_results = open(FullPathResults, "w")
 ClassificationResultsTable = []
 

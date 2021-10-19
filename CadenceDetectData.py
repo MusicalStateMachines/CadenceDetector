@@ -42,6 +42,10 @@ class CDHarmonicChordInversions(Enum):
     Second = 2
     Third = 3
 
+class CDKeyDetectionModes(Enum):
+    FromFile = 0
+    KSWithSmoothing = 1
+    KSWithSmoothingCadenceSensitive = 2
 
 class CDHarmonicState:
     def __init__(self, Key, Chord, ChordWithRests,  ChordDegree, ChordInversion, ChordFigure, Alberti, Arpeggio, TimeSig):
