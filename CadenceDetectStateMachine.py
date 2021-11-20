@@ -7,13 +7,14 @@ class CDStateMachine(object):
         # initiliaze with invalid states
         self.PrevCadentialState = CDCadentialStates.Idle
         self.CurrCadentialState = CDCadentialStates.Idle
-        self.CurrHarmonicState = CDHarmonicState([], [], [], 0, 0, 0, 0, 0, 0)
+        self.CurrHarmonicState = CDHarmonicState([], [], [], 0, 0, 0, 0, 0, 0, [])
         self.PrevHarmonicState = self.CurrHarmonicState
         self.CurrCadentialOutput = CDCadentialStates.Idle
-        self.CurrHarmonicState = CDHarmonicState([], chord.Chord(), chord.Chord(), 0, 0, 0, 0, 0, meter.TimeSignature())
+        self.CurrHarmonicState = CDHarmonicState([], chord.Chord(), chord.Chord(), 0, 0, 0, 0, 0, meter.TimeSignature(),[])
         self.ChangeFlagOneShot = 0
         self.KeyChangeOneShot = 0
         self.FirstKeyDetectionDone = 0
+        self.CadentialKeyChange = 0
         self.TriggerString = str("")
         self.MeasureCounter = 0
         self.PostCadenceMeasureCounter = MinPostCadenceMeasures
@@ -23,7 +24,7 @@ class CDStateMachine(object):
         self.ChordOfLastCadence = 0
         self.SopranoOfLastCadence = 0
 
-    def updateHarmonicState(self, Key, Chord, ChordWithRests, ChordDegree, ChordInversion, ChordFigure, Alberti, Arpeggio):
+    def updateHarmonicState(self, Key, Chord, ChordWithRests, ChordDegree, ChordInversion, ChordFigure, Alberti, Arpeggio, RomamNumeral):
 
         self.PrevHarmonicState = copy.deepcopy(self.CurrHarmonicState)
         self.KeyChangeOneShot = 0
@@ -37,6 +38,7 @@ class CDStateMachine(object):
         self.CurrHarmonicState.ChordFigure = ChordFigure
         self.CurrHarmonicState.Alberti = Alberti
         self.CurrHarmonicState.Arpeggio = Arpeggio
+        self.CurrHarmonicState.RomanNumeral = RomamNumeral
         self.updateCadentialState()
 
     def checkStateChanged(self):
@@ -140,11 +142,18 @@ class CDStateMachine(object):
     def harmonyHasThird(self):
         return not (self.CurrHarmonicState.Chord.third is None)
 
+    def isMatchingQuality(self):
+        return not self.harmonyHasThird() or\
+               (self.CurrHarmonicState.RomanNumeral.quality == self.CurrHarmonicState.Key.mode)
+
     def harmonyHasSeventh(self):
         return not (self.CurrHarmonicState.Chord.seventh is None)
 
     def isLeadingToneSoprane(self):
         return self.CurrHarmonicState.Chord.pitches[-1].pitchClass == self.CurrHarmonicState.Key.pitchFromDegree(7).pitchClass
+
+    def isLeadingToneBass(self):
+        return self.compareBassWithPitch(self.CurrHarmonicState.Key.pitchFromDegree(7).pitchClass)
 
     def isRootedHarmony(self):
         return self.compareBassWithPitch(self.CurrHarmonicState.Chord.root().pitchClass)
@@ -255,9 +264,9 @@ class CDStateMachine(object):
                 if (self.CurrHarmonicState.ChordDegree == CDHarmonicChordDegrees.V.value or self.tryGetBeatStrength()>=0.5):
                     # ==using 5th degree to go to PAC expected - TBD, this includes I64 but also need to see about passing chords
                     curr_state = CDCadentialStates.CadInevitable
-            #elif self.isLeadingToneSoprane():
+            elif self.isLeadingToneSoprane() or self.isLeadingToneBass():
                 # ==using leadind tone  to go to IAC expected - TBD, need to see about passing chords
-                # curr_state = CDCadentialStates.IACArrivalExpected
+                curr_state = CDCadentialStates.IACArrivalExpected
             #elif self.CurrHarmonicState.ChordDegree == CDHarmonicChordDegrees.I.value:
                 #     curr_state = CDCadentialStates.HCArrivalExpected
 
@@ -267,7 +276,7 @@ class CDStateMachine(object):
         # ========================================================
         # ====inevitable cadence (PAC or IAC), wait for Is========
         # ========================================================
-        elif curr_state==CDCadentialStates.CadInevitable: # or curr_state==CDCadentialStates.IACArrivalExpected:
+        elif curr_state==CDCadentialStates.CadInevitable or curr_state==CDCadentialStates.IACArrivalExpected:
 
             #on dominant and then a complete rest --> HC
             if self.CurrHarmonicState.ChordWithBassRests.isRest:
@@ -369,7 +378,7 @@ class CDStateMachine(object):
                         curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival)
                     #else:
                     #    curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACAppoggExpected)
-                elif not self.isSopraneOnDegree(1) or not (self.isDominantBass() or self.isMediantBass()):#continue the appogiattura if dominant or mediant bass
+                elif not (self.isSopraneOnDegree(1) or self.isDominantBass() or self.isMediantBass()):#continue the appogiattura if dominant or mediant bass
                     curr_state = CDCadentialStates.CadAvoided
 
 
@@ -378,14 +387,14 @@ class CDStateMachine(object):
             if self.CurrHarmonicState.ChordWithBassRests.isRest:
                 curr_state = CDCadentialStates.Idle
             else:
-                if self.isTonicBass() or self.isDominantBass():
+                if self.isTonicBass():
                     if self.isSopraneOnDegree(1):
                         curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival)
                     elif self.isSopraneOnDegree(3) or self.isSopraneOnDegree(5):
                         curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival)
                     #else:
                     #    curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACAppoggExpected)
-                elif not self.isSopraneOnDegree(1) or not (self.isDominantBass() or self.isMediantBass()):#continue the appogiattura if dominant or mediant bass
+                elif not (self.isSopraneOnDegree(1) or self.isDominantBass() or self.isMediantBass()):#continue the appogiattura if dominant or mediant bass
                     curr_state = CDCadentialStates.CadAvoided
 
 
@@ -538,9 +547,10 @@ class CDStateMachine(object):
                 Lyric = Lyric + self.TriggerString
 
 
-        if self.KeyChangeOneShot == 1 or self.FirstKeyDetectionDone == 0:
-            Lyric = Lyric + str("\n") + str(self.CurrHarmonicState.Key)
+        if self.KeyChangeOneShot == 1 or self.FirstKeyDetectionDone == 0 or self.CadentialKeyChange == 1:
+            Lyric = Lyric + str("\nKey: ") + str(self.CurrHarmonicState.Key)
             self.FirstKeyDetectionDone = 1
+            self.CadentialKeyChange = 0
 
         #debug arpeggios and alberti
         #if self.CurrHarmonicState.Alberti:

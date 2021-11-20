@@ -19,13 +19,17 @@ class CadenceDetector:
         self.ChordStream = []
         self.ChordStreamRestless = []
         self.KeyPerMeasure = []
+        self.CorrectedKeyPerMeasure = []
         self.InterpretationsPerMeasure = []
+        self.SmoothedCorrCoefsPerMeasure = []
         self.CurrSmoothedInterpretations = {}
         #{'A': 0, 'B-': 0, 'B': 0, 'C': 0, 'C#': 0, 'D': 0,
         #'E-': 0, 'E': 0, 'F': 0, 'F#': 0, 'G': 0, 'A-': 0,
         #'a': 0, 'b-': 0, 'b': 0, 'c': 0, 'c#': 0, 'd': 0,
         #'e-': 0, 'e': 0, 'f': 0, 'f#': 0, 'g': 0, 'a-': 0}
         self.Top2Keys = []
+        self.PrevKeyString = []
+        self.PrevChallengerKeyString = []
         self.OptionalKeysPerMeasure = [[]]
         self.NumMeasures = 0
         self.blockSize = 0
@@ -266,6 +270,8 @@ class CadenceDetector:
                 max_key = self.KeyPerMeasure[-1]
 
             self.KeyPerMeasure.append(max_key)
+            self.InterpretationsPerMeasure.append(Key.alternateInterpretations)
+            self.SmoothedCorrCoefsPerMeasure.append(dict(smoothed_corr_coefs))
 
             #sort keys by values and return top 2
             #Top2 = dict(sorted(smoothed_corr_coefs.items(), key=lambda item: item[1] , reverse = True)[:2])
@@ -275,7 +281,7 @@ class CadenceDetector:
 
 
         # left shift everything by N measures, for per key change cadences - TBD, shift key using cadence detection
-        n_shift = 1
+        n_shift = 0
         for i in range(0, len(self.KeyPerMeasure)-n_shift):
             self.KeyPerMeasure[i] = self.KeyPerMeasure[i+n_shift]
 
@@ -286,38 +292,59 @@ class CadenceDetector:
         self.blockSize = blockSize
         self.overlap = overlap
         print("Num Measures:", self.NumMeasures)
-        smoothed_corr_coefs = {}
         for currBlock in range(1, self.NumMeasures+1):
             StopMeasure = min(currBlock + self.blockSize - 1, self.NumMeasures)
             CurrMeasures = self.NoteStream.measures(currBlock, StopMeasure)
             #print(currBlock, StopMeasure)
             try:
-                Key = CurrMeasures.analyze('key')
+                #analysisClasses = [
+                #    Ambitus,
+                #    KrumhanslSchmuckler,
+                #    AardenEssen,
+                #    SimpleWeights,
+                #    BellmanBudge,
+                #    TemperleyKostkaPayne,
+                #]
+                Key = CurrMeasures.analyze('TemperleyKostkaPayne')
                 Key.alternateInterpretations.append(Key)
-                CurrInterpretations = Key.alternateInterpretations
+                CurrInterpretations = list(Key.alternateInterpretations)
             except:
                 print("Key detection error:", sys.exc_info()[0])
                 print("Maintaining previous key")
-                CurrInterpretations = self.InterpretationsPerMeasure[-1]
+                CurrInterpretations = list(self.InterpretationsPerMeasure[-1])
 
             self.InterpretationsPerMeasure.append(CurrInterpretations)
 
 
-    def writeKeyPerMeasureToFile(self):
-        print("Writing keys to file...")
-        keyfileName = self.fileName.replace(".", "_")
-        FullPath = os.path.join(self.WritePath, keyfileName)
-        KeyFile = f"{FullPath}_Key.txt"
-        with open(KeyFile, 'wb') as f:
-            pickle.dump(self.KeyPerMeasure, f)
+    def detectKeyPerMeasureWrapper(self, blockSize, overlap):
+        if self.KeyDetectionMode == CDKeyDetectionModes.KSRaw:
+            self.detectKeyPerMeasure(blockSize, overlap)
+        #elif self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
+        #    self.detectKeyPerMeasure3(blockSize, overlap)
+        elif self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
+            self.detectKeyPerMeasure4(blockSize, overlap)
 
-    def readKeyPerMeasureFromFile(self):
-        print("Reading keys from file...")
-        keyfileName = self.fileName.replace(".", "_")
-        FullPath = os.path.join(self.WritePath, keyfileName)
-        KeyFile = f"{FullPath}_Key.txt"
-        with open(KeyFile, 'rb') as f:
-            self.KeyPerMeasure=pickle.load(f)
+    def reenforceKeyByFactor(self, keyString, enhancement):
+        enhancedCoef = math.pow(self.CurrSmoothedInterpretations[keyString], 1/enhancement)
+        self.CurrSmoothedInterpretations[keyString] = enhancedCoef
+
+    def writeKeyPerMeasureToFile(self, KeyDetectionMode):
+        if KeyDetectionMode != CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+            print("Writing keys to file...")
+            keyfileName = self.fileName.replace(".", "_")
+            FullPath = os.path.join(self.WritePath, keyfileName)
+            KeyFile = f"{FullPath}_Key_{KeyDetectionMode}.txt"
+            with open(KeyFile, 'wb') as f:
+                pickle.dump(self.KeyPerMeasure, f)
+
+    def readKeyPerMeasureFromFile(self, KeyDetectionMode):
+        if KeyDetectionMode != CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+            print("Reading keys from file...")
+            keyfileName = self.fileName.replace(".", "_")
+            FullPath = os.path.join(self.WritePath, keyfileName)
+            KeyFile = f"{FullPath}_Key_{KeyDetectionMode}.txt"
+            with open(KeyFile, 'rb') as f:
+                self.KeyPerMeasure=pickle.load(f)
 
     def getKeyPerMeasureFromSearsFile(self,FullPath):
         FullPath = FullPath.replace(".xml", ".txt")
@@ -434,7 +461,6 @@ class CadenceDetector:
         return arpeggioBeats
 
     def smoothKeyInterpretations(self, measureIndex):
-        Tc = 0.9
         currInterpretations = self.InterpretationsPerMeasure[measureIndex]
         for interpretation in currInterpretations:
             corrCoef = interpretation.correlationCoefficient
@@ -442,14 +468,14 @@ class CadenceDetector:
             if keyString not in self.CurrSmoothedInterpretations:
                 self.CurrSmoothedInterpretations[keyString] = corrCoef
             currSmoothedVal = self.CurrSmoothedInterpretations[keyString]
-            currSmoothedVal = Tc * currSmoothedVal + (1-Tc) * corrCoef
+            currSmoothedVal = self.KeyDetectionForgetFactor * currSmoothedVal + (1-self.KeyDetectionForgetFactor) * corrCoef
             self.CurrSmoothedInterpretations[keyString] = currSmoothedVal
 
 
     def getTopNKeyInterpretations(self, N):
         #now sort by value
         SortedKeys = sorted(self.CurrSmoothedInterpretations.items(), key=lambda x: x[1], reverse=True)
-        TopNKeys = SortedKeys[:N]
+        TopNKeys = list(SortedKeys[:N])
         return TopNKeys
 
 
@@ -482,7 +508,7 @@ class CadenceDetector:
                 ArpeggioBeats = self.detectArpeggioBassInMeasure(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'), 4)
 
             #debug per measure
-            if currMeasureIndex==11:
+            if currMeasureIndex == 33:
                 bla=0
 
             LyricPerBeat = []
@@ -503,20 +529,21 @@ class CadenceDetector:
                     currKey = m21.key.Key(currKeyString)
                     challengerKeyString = self.Top2Keys[1][0]
                     challengerKey = m21.key.Key(challengerKeyString)
+                    self.updateKeysAndSwapStateMachines(currKeyString, challengerKeyString)
 
                 if thisChord.isRest:
-                    self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio)
+                    self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio, [])
                 else:
                     rn = m21.roman.romanNumeralFromChord(thisChord, currKey)
-                    self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, rn.scaleDegree, rn.inversion(), rn.figure, alberti, arpeggio)
+                    self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, rn.scaleDegree, rn.inversion(), rn.figure, alberti, arpeggio, rn)
 
                 if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or \
                         self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
                     if thisChord.isRest:
-                        self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio)
+                        self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio, [])
                     else:
                         rn2 = m21.roman.romanNumeralFromChord(thisChord, challengerKey)
-                        self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, rn2.scaleDegree, rn2.inversion(), rn2.figure, alberti, arpeggio)
+                        self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, rn2.scaleDegree, rn2.inversion(), rn2.figure, alberti, arpeggio, rn2)
 
 
                 #TBD - should we handle this reversion in challenger?
@@ -526,26 +553,33 @@ class CadenceDetector:
                     LyricPerBeat[-1] = [LastPACTuple[0], UpdatedLyric]
                     print("Reverting last PAC to IAC")
 
-
-                StateMachineForCadence = self.HarmonicStateMachine
+                Lyric = self.HarmonicStateMachine.getCadentialOutputString()
+                LyricChallenger = self.HarmonicStateMachineChallenger.getCadentialOutputString()
                 # Cadence Sensitive Key Detection Mode
                 if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
-                    # Challenger Check
-                    # if cadence happened in challenger key and not in main key
-                    if 'PAC' in self.HarmonicStateMachineChallenger.getCadentialOutputString() and \
-                            'PAC' not in self.HarmonicStateMachine.getCadentialOutputString():
-                        # force set smooth coef of challenger to 1 and use output of SM 2 as temporary output
-                        self.CurrSmoothedInterpretations[challengerKeyString] = 1
+                    # and self.HarmonicStateMachineChallenger.CurrHarmonicState.Key.tonic != self.HarmonicStateMachine.CurrHarmonicState.Key.tonic: #don't be sensitive to candece in parallel key:
+                    # Cadence check in main key (for key re-enforcement)
+                    ReenforcementFactors = {'PAC': 4/3, 'IAC': 5/4, 'HC': 5/4}
+                    resort = False
+                    for cad in ReenforcementFactors:
+                        if cad in Lyric:
+                            self.reenforceKeyByFactor(currKeyString, ReenforcementFactors[cad])
+                        # Challenger Check (for key switching)
+                        if cad in LyricChallenger:
+                            self.reenforceKeyByFactor(challengerKeyString, ReenforcementFactors[cad])
+                            resort = True
+
+                    if resort:
                         # re-sort and return Top2Keys
                         self.Top2Keys = self.getTopNKeyInterpretations(2)
-                        StateMachineForCadence = self.HarmonicStateMachineChallenger
-                        #self.HarmonicStateMachine.CurrCadentialState = CDCadentialStates.Idle
-                        print('Cadential Key Change!')
+                        if challengerKeyString == self.Top2Keys[0][0]:
+                            Lyric = LyricChallenger
+                            print('Cadential Key Change!')
 
                 # debugging
                 # print(self.HarmonicStateMachine.getCadentialOutput().value)
                 # thisChord.lyric = str(rn.figure)
-                Lyric = StateMachineForCadence.getCadentialOutputString()
+
                 if Lyric:   # only work on non-empty lyrics
                     thisChord.lyric = Lyric
                     LyricPerBeat.append([thisChord.beat,Lyric])
@@ -569,7 +603,8 @@ class CadenceDetector:
                     print('Measure ', currMeasureIndex + 1 - self.hasPickupMeasure, ' offset ', measuresSecondsMap[currMeasureIndex]['offsetSeconds'], " ", Lyric)
                     print(f"Measure: {currMeasureIndex + 1 - self.hasPickupMeasure} Offset: {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {Lyric}", file=text_file)
                     print(f"{currMeasureIndex + 1 - self.hasPickupMeasure} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {CadStringToNumMap[CadString]}", file=text_fileOffsets)
-
+                elif "Key" in Lyric:
+                    print(Lyric)
 
                 # save transitions to file regardless of Lyrics
                 # if prevState != self.HarmonicStateMachine.getCadentialOutput().value:
@@ -590,6 +625,12 @@ class CadenceDetector:
                     if found == 1:
                         break
 
+            #write corrected key at end of measure
+            if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
+                correctedKeyString = self.Top2Keys[0][0]
+                correctedKey = m21.key.Key(correctedKeyString)
+                self.CorrectedKeyPerMeasure.append(correctedKey)
+
         text_file.close()
         text_fileOffsets.close()
         text_fileTransitions.close()
@@ -597,6 +638,26 @@ class CadenceDetector:
             c.closedPosition(forceOctave=4, inPlace=True)
         # this adds the restless chord stream to the note stream
         # self.NoteStream.insert(0, self.ChordStream)
+
+        if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
+            print("Writing cadence corrected keys to file...")
+            keyfileName = self.fileName.replace(".", "_")
+            FullPath = os.path.join(self.WritePath, keyfileName)
+            KeyFile = f"{FullPath}_Key_{self.KeyDetectionMode}.txt"
+            with open(KeyFile, 'wb') as f:
+                pickle.dump(self.CorrectedKeyPerMeasure, f)
+
+    def updateKeysAndSwapStateMachines(self, currKeyString, challengerKeyString):
+        # this swap assures the smoothness of key transition if challenger becomes main (and main becomes challenger)
+        if currKeyString != self.PrevKeyString:
+            tempStateMachine = copy.deepcopy(self.HarmonicStateMachine)
+            if currKeyString == self.PrevChallengerKeyString:
+                self.HarmonicStateMachine = copy.deepcopy(self.HarmonicStateMachineChallenger)
+                self.HarmonicStateMachine.CadentialKeyChange = 1
+            if challengerKeyString == self.PrevKeyString:
+                self.HarmonicStateMachineChallenger = copy.deepcopy(tempStateMachine)
+        self.PrevKeyString = currKeyString
+        self.PrevChallengerKeyString = challengerKeyString
 
     def setFileName(self,fileName):
         self.fileName = fileName
