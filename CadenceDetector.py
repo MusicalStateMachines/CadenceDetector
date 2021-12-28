@@ -39,6 +39,7 @@ class CadenceDetector:
         self.WritePath = 0
         self.KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothing
         self.KeyDetectionForgetFactor = 0.9
+        self.MeasuresWithRepeatBrackets = []
 
     def loadMusic21Corpus(self,fileString):
         self.NoteStream = m21.corpus.parse(fileString)
@@ -72,6 +73,7 @@ class CadenceDetector:
 
         self.NumMeasures = len(self.ChordStream.recurse().getElementsByClass('Measure'))
         self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
+        self.findVoltas()
         self.NoteStreamRestless = copy.deepcopy(self.NoteStream)  #create new list so as not to alter the original stream
         self.replaceBassRestsWithPrevs()
         self.addMyLablesToParts(self.NoteStreamRestless)
@@ -79,6 +81,15 @@ class CadenceDetector:
             self.ChordStreamRestless = self.NoteStreamRestless.chordify(addPartIdAsGroup=True, removeRedundantPitches=False)
         else:
             self.ChordStreamRestless = self.NoteStreamRestless.chordify(removeRedundantPitches=False)
+
+
+    def findVoltas(self):
+        self.MeasuresWithRepeatBrackets = [0] * self.NumMeasures
+        RepeatBrackets = self.NoteStream.recurse().getElementsByClass('RepeatBracket')
+        for repeat in RepeatBrackets:
+            for sp_store in repeat.spannerStorage:
+                measureIndex = sp_store.measureNumber - 1
+                self.MeasuresWithRepeatBrackets[measureIndex] = 1
 
 
     def removePickupMeasure(self):
@@ -420,11 +431,11 @@ class CadenceDetector:
                 retVal = False
         return retVal
 
-    def isAlbertiPattern(self, pitches):
-        retVal = False
-        if len(pitches) >= 4:
-            if all(x.midi > pitches[0].midi for x in pitches[1:]) and pitches[1].midi == pitches[3].midi:
-                retVal = True
+    def isAlbertiPattern(self, pitches, pattern_len):
+        retVal =  all(x.midi > pitches[0].midi for x in pitches[1:4]) and pitches[1].midi == pitches[3].midi
+        # for pattern length 6 (3/4,3/8,6/8) verify last two as well
+        if pattern_len == 6:
+            retVal = retVal and pitches[3].midi == pitches[5].midi
         return retVal
 
     def extractBassLine(self, measure):
@@ -438,15 +449,16 @@ class CadenceDetector:
         return lowestPitches
 
 
-    def detectAlbertiBassInMeasure(self, measure):
+    def detectAlbertiBassInMeasure(self, measure, pattern_len):
         #first exact bassline from chords
         lowestPitches = self.extractBassLine(measure)
         albertiBeats = [0]*len(measure)
-        for beat in range(0, len(measure), 4):
-            fourNotes = lowestPitches[beat:beat+4]
-            if None not in fourNotes:
-                isAlberti = self.isAlbertiPattern(fourNotes)
-                albertiBeats[beat:beat+4] = [isAlberti] * 4
+        for beat in range(0, len(measure), pattern_len):
+            if beat+pattern_len <= len(measure):
+                pattern_notes = lowestPitches[beat:beat+pattern_len]
+                if None not in pattern_notes:
+                    isAlberti = self.isAlbertiPattern(pattern_notes,pattern_len)
+                    albertiBeats[beat:beat+pattern_len] = [isAlberti] * pattern_len
         return albertiBeats
 
 
@@ -490,8 +502,10 @@ class CadenceDetector:
         measuresSecondsMap = list(filter(lambda d: d['durationSeconds'] > 0, self.ChordStreamRestless.secondsMap))
 
         prevState = []
+        repeat_counter = 0
 
         for currMeasureIndex in range(0,self.NumMeasures):
+            repeat_counter = repeat_counter + self.MeasuresWithRepeatBrackets[currMeasureIndex]
             CurrMeasuresRestless= self.ChordStreamRestless.measures(currMeasureIndex+1,currMeasureIndex+1)#measures start with 1
             CurrMeasures = self.ChordStream.measures(currMeasureIndex + 1,currMeasureIndex + 1)  # measures start with 1
             #check and update timesig
@@ -500,15 +514,17 @@ class CadenceDetector:
                     self.HarmonicStateMachine.CurrHarmonicState.TimeSig = timeSig
                     self.HarmonicStateMachineChallenger.CurrHarmonicState.TimeSig = timeSig
 
-            if self.HarmonicStateMachine.CurrHarmonicState.TimeSig.ratioString in ['3/4', '6/8']:
-                AlbertiBeats = [0] * len(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'))
-                ArpeggioBeats = self.detectArpeggioBassInMeasure(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'), 3)
+            if self.HarmonicStateMachine.CurrHarmonicState.TimeSig.ratioString in ['3/4', '3/8', '6/8']:
+                alberti_len = 6
+                arp_len = 3
             else:
-                AlbertiBeats = self.detectAlbertiBassInMeasure(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'))
-                ArpeggioBeats = self.detectArpeggioBassInMeasure(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'), 4)
+               alberti_len = 4
+               arp_len = 4
+            AlbertiBeats = self.detectAlbertiBassInMeasure(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'), pattern_len=alberti_len)
+            ArpeggioBeats = self.detectArpeggioBassInMeasure(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'), arp_len=arp_len)
 
             #debug per measure
-            if currMeasureIndex == 33:
+            if currMeasureIndex == 174:
                 bla=0
 
             LyricPerBeat = []
@@ -559,7 +575,7 @@ class CadenceDetector:
                 if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
                     # and self.HarmonicStateMachineChallenger.CurrHarmonicState.Key.tonic != self.HarmonicStateMachine.CurrHarmonicState.Key.tonic: #don't be sensitive to candece in parallel key:
                     # Cadence check in main key (for key re-enforcement)
-                    ReenforcementFactors = {'PAC': 4/3, 'IAC': 5/4, 'HC': 5/4}
+                    ReenforcementFactors = {'PAC': 2, 'IAC': 5/4, 'HC': 5/4}
                     resort = False
                     for cad in ReenforcementFactors:
                         if cad in Lyric:
@@ -600,9 +616,10 @@ class CadenceDetector:
                     elif "PCC" in Lyric:
                         CadString = "PCC"
                     CadStringToNumMap = {"PAC": CDCadentialStates.PACArrival.value, "IAC": CDCadentialStates.IACArrival.value, "HC": CDCadentialStates.HCArrival.value, "PCC": CDCadentialStates.PCCArrival.value}
-                    print('Measure ', currMeasureIndex + 1 - self.hasPickupMeasure, ' offset ', measuresSecondsMap[currMeasureIndex]['offsetSeconds'], " ", Lyric)
-                    print(f"Measure: {currMeasureIndex + 1 - self.hasPickupMeasure} Offset: {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {Lyric}", file=text_file)
-                    print(f"{currMeasureIndex + 1 - self.hasPickupMeasure} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {CadStringToNumMap[CadString]}", file=text_fileOffsets)
+                    measure_to_write = currMeasureIndex + 1 - self.hasPickupMeasure - math.floor(repeat_counter/2)
+                    print('Measure ', measure_to_write, ' offset ', measuresSecondsMap[currMeasureIndex]['offsetSeconds'], " ", Lyric)
+                    print(f"Measure: {measure_to_write} Offset: {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {Lyric}", file=text_file)
+                    print(f"{measure_to_write} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {CadStringToNumMap[CadString]}", file=text_fileOffsets)
                 elif "Key" in Lyric:
                     print(Lyric)
 

@@ -281,6 +281,9 @@ class CDStateMachine(object):
             #on dominant and then a complete rest --> HC
             if self.CurrHarmonicState.ChordWithBassRests.isRest:
                 curr_state = CDCadentialStates.HCArrival
+            elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio) and self.tryGetBeatStrength() < 0.5:
+                #if alberti and weak beat do nothing
+                curr_state = curr_state
             else:
                 # for the case where in IAC expected and dominant appears again, the back to Cad inevitable (TBD, separate these states)
                 if self.isDominantBass():
