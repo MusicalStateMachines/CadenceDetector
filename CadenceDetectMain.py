@@ -3,11 +3,12 @@ from music21 import *
 DownloadsPath = '/Users/matanba/Downloads/'
 SearsHaydnPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 DCMLabMozartPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml'
+BeethovenPath = '/Users/matanba/Downloads/'
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
 XMLFileEnding = ".xml"
 
-InputFilePath = SearsHaydnPath
+InputFilePath = DCMLabMozartPath
 OutputFilePath = MyPath
 
 #===for testing a single file not in database
@@ -23,11 +24,14 @@ TextFileEnding = ".txt"
 ReadKeyFromSears = 0
 RunKeyDetection = 1
 RunCadenceDetection = 1
-KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
 DoParallelProcessing = 1
 OnlyGetNumMeasures = False
-KeyDetectionBlockSize = 4  # in measures
+# Tunable Parameters
+KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
+KeyDetectionBlockSizes = {SearsHaydnPath: 4, DCMLabMozartPath: 4, BeethovenPath: 4} # in measures
+KeyDetectionBlockSize = KeyDetectionBlockSizes[InputFilePath]
 KeyDetectionForgetFactor = 0.8
+ReenforcementFactors = {'PAC': 3/2, 'IAC': 5/4, 'HC': 5/4}
 
 import os
 import time
@@ -42,6 +46,7 @@ def findCadencesInFile(file, only_get_num_measures = False):
         CD = CadenceDetector()
         CD.KeyDetectionMode = KeyDetectionMode
         CD.KeyDetectionForgetFactor = KeyDetectionForgetFactor
+        CD.ReenforcementFactors = ReenforcementFactors
         if only_get_num_measures:
             CD.loadFileAndGetMeasures(FullPath)
         else:

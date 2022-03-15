@@ -29,7 +29,7 @@ DCMData.TotalNumMeasures = 12360
 DCMData.Label = "DCM_MozartSonatas"
 
 # set which database to compare to
-TestData = SearsData
+TestData = DCMData
 
 # set state machine data
 StateMachineData = LabeledData()
