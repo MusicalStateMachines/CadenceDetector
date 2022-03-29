@@ -8,7 +8,7 @@ MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
 XMLFileEnding = ".xml"
 
-InputFilePath = DCMLabMozartPath
+InputFilePath = SearsHaydnPath
 OutputFilePath = MyPath
 
 #===for testing a single file not in database
@@ -31,7 +31,10 @@ KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
 KeyDetectionBlockSizes = {SearsHaydnPath: 4, DCMLabMozartPath: 4, BeethovenPath: 4} # in measures
 KeyDetectionBlockSize = KeyDetectionBlockSizes[InputFilePath]
 KeyDetectionForgetFactor = 0.8
-ReenforcementFactors = {'PAC': 3/2, 'IAC': 5/4, 'HC': 5/4}
+ReenforcementFactorsDict = {SearsHaydnPath: {'PAC': 3/2, 'IAC': 1, 'HC': 5/4},
+                            DCMLabMozartPath: {'PAC': 2, 'IAC': 1, 'HC': 5/4},
+                            BeethovenPath: {'PAC': 3/2, 'IAC': 1, 'HC': 5/4}}
+ReenforcementFactors = ReenforcementFactorsDict[InputFilePath]
 
 import os
 import time

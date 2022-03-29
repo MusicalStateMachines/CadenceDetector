@@ -107,25 +107,32 @@ class CadenceDetector:
 
 
     def findIncompleteMeasures(self):
+        print('Finding incomplete measures...')
         self.IncompleteMeasures = [0] * self.NumMeasures
         time_sig = []
-        for i,measure in enumerate(self.ChordStream.recurse().getElementsByClass(stream.Measure)):
+        for i in range(self.NumMeasures): #enumerate(self.ChordStream.recurse().getElementsByClass(stream.Measure)):
+            measure = self.ChordStream.measures(i,i)
+            if i==36:
+                bla = 0
             for timeSig in measure.recurse().getElementsByClass(m21.meter.TimeSignature):
                 time_sig = timeSig
-            total_duration = 0
-            for chord in measure.notesAndRests:
-                total_duration = total_duration + chord.duration.quarterLength
-            epsilon = 1 # this epsilon is needed because of inaccuracy caused by decoration notes in some scores
-            if total_duration + epsilon < time_sig.barDuration.quarterLength:
-                self.IncompleteMeasures[i] = True
+            chords = [chord for chord in measure.recurse().getElementsByClass('GeneralNote')]
+            if chords and not chords[-1].isRest: # this attemps to avoid false pickups (i.e. ignore cases where the rest is just not long enough) - not sure this is solid for all pickups
+                lengths = [chord.duration.quarterLength for chord in chords]
+                total_duration = sum(lengths)
+                epsilon = 0.1 # this epsilon is needed because of inaccuracy caused by decoration notes in some scores
+                if total_duration < (1 - epsilon) * time_sig.barDuration.quarterLength:
+                    self.IncompleteMeasures[i] = True
         # use pickup detection from Haydn
         self.IncompleteMeasures[0] = self.IncompleteMeasures[0] or self.hasPickupMeasure
+        incomplete_measures = [i+1 for i,inc in enumerate(self.IncompleteMeasures) if inc]
+        print('Incomplete meaures:', incomplete_measures)
 
 
     def findMeasureOffset(self):
         for i in range(0,self.NumMeasures):
             curr_measure = self.ChordStream.measures(i,i)
-            if len(curr_measure) == 0:
+            if len(curr_measure.recurse().notesAndRests) == 0:
                 self.MeasureOffset = self.MeasureOffset + 1
             else:
                 break
@@ -566,9 +573,14 @@ class CadenceDetector:
         incomplete_counter = 0
 
         for currMeasureIndex in range(0,self.NumMeasures):
+        #for currMeasureIndex, (CurrMeasuresRestless,CurrMeasures, CurrMeasuresNotes, CurrMeasureBass) in enumerate(zip(self.ChordStreamRestless.recurse().getElementsByClass(stream.Measure), self.ChordStream.recurse().getElementsByClass(stream.Measure), self.NoteStream.recurse().getElementsByClass(stream.Measure),self.BassChords.recurse().getElementsByClass(stream.Measure))):
             # debug per measure
-            if currMeasureIndex == 28:
+            if currMeasureIndex == 69:
                 bla = 0
+
+            if currMeasureIndex > self.NumMeasures - 1:
+                print('reached num measures, stopping processing')
+                break
 
             if self.IncompleteMeasures[currMeasureIndex]:
                 incomplete_counter = incomplete_counter + 1
@@ -699,6 +711,10 @@ class CadenceDetector:
                 # prevState = self.HarmonicStateMachine.getCadentialOutput().value
                 # thisChord.lyric = str("block ") + str(i)
 
+            #for debugging measure number problems
+            LyricPerBeat.append((1,str(currMeasureIndex)))
+
+            #CurrMeasuresNotes2 = self.NoteStream.measures(currMeasureIndex,currMeasureIndex)
             Parts = CurrMeasuresNotes.recurse().getElementsByClass(m21.stream.Part)
 
             for thisLyric in LyricPerBeat:
