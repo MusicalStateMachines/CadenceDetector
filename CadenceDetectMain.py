@@ -3,12 +3,19 @@ from music21 import *
 DownloadsPath = '/Users/matanba/Downloads/'
 SearsHaydnPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 DCMLabMozartPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml'
-BeethovenPath = '/Users/matanba/Downloads/'
+SuzuBeethovenPath = '/Users/matanba/Downloads/'
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
+# haydn singe file
+XMLFileEnding = "op050_no02_mv01.xml"
+# mozart single file
+XMLFileEnding = "333-3.xml"
+# all files
 XMLFileEnding = ".xml"
-
-InputFilePath = SearsHaydnPath
+# multi-core processing
+DoParallelProcessing = 1
+# select analysis path
+InputFilePath = DCMLabMozartPath
 OutputFilePath = MyPath
 
 #===for testing a single file not in database
@@ -24,16 +31,15 @@ TextFileEnding = ".txt"
 ReadKeyFromSears = 0
 RunKeyDetection = 1
 RunCadenceDetection = 1
-DoParallelProcessing = 1
 OnlyGetNumMeasures = False
 # Tunable Parameters
 KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
-KeyDetectionBlockSizes = {SearsHaydnPath: 4, DCMLabMozartPath: 4, BeethovenPath: 4} # in measures
+KeyDetectionBlockSizes = {SearsHaydnPath: 4, DCMLabMozartPath: 4, SuzuBeethovenPath: 4} # in measures
 KeyDetectionBlockSize = KeyDetectionBlockSizes[InputFilePath]
 KeyDetectionForgetFactor = 0.8
-ReenforcementFactorsDict = {SearsHaydnPath: {'PAC': 3/2, 'IAC': 1, 'HC': 5/4},
-                            DCMLabMozartPath: {'PAC': 2, 'IAC': 1, 'HC': 5/4},
-                            BeethovenPath: {'PAC': 3/2, 'IAC': 1, 'HC': 5/4}}
+ReenforcementFactorsDict = {SearsHaydnPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2},
+                            DCMLabMozartPath: {'PAC': 3, 'IAC': 1, 'HC': 3/2},
+                            SuzuBeethovenPath: {'PAC': 3/2, 'IAC': 1, 'HC': 5/4}}
 ReenforcementFactors = ReenforcementFactorsDict[InputFilePath]
 
 import os
@@ -75,8 +81,8 @@ def findCadencesInFile(file, only_get_num_measures = False):
                 CD.detectCadences()
                 try:
                     CD.writeAnalyzedFile()
-                except:
-                    print('error: could not write file')
+                except Exception as e:
+                    print('error: could not write file:', e)
         return CD.NumMeasures
         #display
         #CD.displayFull()
