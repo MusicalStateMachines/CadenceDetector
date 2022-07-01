@@ -1,21 +1,25 @@
 from CadenceDetector import *
 from music21 import *
+import tqdm
+from functools import partial
 DownloadsPath = '/Users/matanba/Downloads/'
 SearsHaydnPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 DCMLabMozartPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml'
-SuzuBeethovenPath = '/Users/matanba/Downloads/'
+DCMBeethovenPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data/mxl'
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
 # haydn singe file
-XMLFileEnding = "op050_no02_mv01.xml"
+XMLFileEnding = "op076_no05_mv02.xml"
 # mozart single file
-XMLFileEnding = "333-3.xml"
+XMLFileEnding = "284-3.xml"
+# beethoven single file
+# XMLFileEnding = "op127_no12_mov1.mxl"
 # all files
 XMLFileEnding = ".xml"
 # multi-core processing
 DoParallelProcessing = 1
 # select analysis path
-InputFilePath = DCMLabMozartPath
+InputFilePath = SearsHaydnPath
 OutputFilePath = MyPath
 
 #===for testing a single file not in database
@@ -34,12 +38,12 @@ RunCadenceDetection = 1
 OnlyGetNumMeasures = False
 # Tunable Parameters
 KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
-KeyDetectionBlockSizes = {SearsHaydnPath: 4, DCMLabMozartPath: 4, SuzuBeethovenPath: 4} # in measures
+KeyDetectionBlockSizes = {SearsHaydnPath: 4, DCMLabMozartPath: 4, DCMBeethovenPath: 4} # in measures
 KeyDetectionBlockSize = KeyDetectionBlockSizes[InputFilePath]
 KeyDetectionForgetFactor = 0.8
 ReenforcementFactorsDict = {SearsHaydnPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2},
                             DCMLabMozartPath: {'PAC': 3, 'IAC': 1, 'HC': 3/2},
-                            SuzuBeethovenPath: {'PAC': 3/2, 'IAC': 1, 'HC': 5/4}}
+                            DCMBeethovenPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2}}
 ReenforcementFactors = ReenforcementFactorsDict[InputFilePath]
 
 import os
@@ -83,27 +87,31 @@ def findCadencesInFile(file, only_get_num_measures = False):
                     CD.writeAnalyzedFile()
                 except Exception as e:
                     print('error: could not write file:', e)
-        return CD.NumMeasures
+        return {'file': file, 'num_measures': CD.NumMeasures}
         #display
         #CD.displayFull()
 
 
 if __name__ == '__main__':
     fileList = sorted(os.listdir(InputFilePath))
+    full_list = [file for file in fileList if file.endswith(XMLFileEnding)]
     start = time.time()
     if DoParallelProcessing:
         print("Parallel Processing On")
         print("Number of processors: ", mp.cpu_count())
-        pool = mp.Pool(mp.cpu_count())
-        pool.map_async(findCadencesInFile, [file for file in fileList]).get()
-        pool.close()
+        with mp.Pool() as pool:
+            num_measures_per_mov = list(tqdm.tqdm(pool.imap_unordered(partial(findCadencesInFile, only_get_num_measures=OnlyGetNumMeasures), full_list), total=len(full_list)))
+        total_num_measures = sum([curr_tup['num_measures'] for curr_tup in num_measures_per_mov])
     else:
         print("Parallel Processing Off")
         total_num_measures = 0
-        for file in fileList:
-            curr_num_measures = findCadencesInFile(file, only_get_num_measures=OnlyGetNumMeasures)
-            if curr_num_measures is not None:
-                total_num_measures = total_num_measures + curr_num_measures
+        for file in tqdm.tqdm(full_list):
+            num_measures_per_mov = findCadencesInFile(file, only_get_num_measures=OnlyGetNumMeasures)
+            if num_measures_per_mov is not None:
+                total_num_measures = total_num_measures + num_measures_per_mov['num_measures']
+    if num_measures_per_mov:
+        for curr_mov in num_measures_per_mov:
+            print(curr_mov)
         print("Total Num Measures:", total_num_measures)
 
     end = time.time()

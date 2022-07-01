@@ -2,15 +2,10 @@ from music21 import *
 from enum import Enum
 
 #consts
-MaxNumMeasures = 400
+MaxNumMeasures = 500
 MinInitialMeasures = 3
-MinPostCadenceMeasures = 0
+MinPostCadenceMeasures = 1
 
-
-# class MyChord(chord.Chord):
-#     def __init__(self, Chord, Key):
-#         self.Chord = Chord
-#         self.Key = Key
 
 class CDCadentialStates(Enum):
     Idle = 1

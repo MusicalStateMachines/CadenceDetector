@@ -20,7 +20,7 @@ class CDStateMachine(object):
         self.CadentialKeyChange = 0
         self.TriggerString = str("")
         self.MeasureCounter = 0
-        self.PostCadenceMeasureCounter = MinPostCadenceMeasures
+        self.PostCadenceMeasureCounter = -1
         self.CheckBassPartFromChord = False
         self.PACPending = False
         self.RevertLastPAC = False
@@ -45,6 +45,7 @@ class CDStateMachine(object):
         self.CurrHarmonicState.Alberti = Alberti
         self.CurrHarmonicState.Arpeggio = Arpeggio
         self.CurrHarmonicState.RomanNumeral = RomamNumeral
+        self.updateCounters()
         self.updateCadentialState()
 
     def checkStateChanged(self):
@@ -55,30 +56,27 @@ class CDStateMachine(object):
             self.TriggerString = self.TriggerString.translate(SUB)
             self.PrevCadentialState = self.CurrCadentialState
             if self.CurrCadentialState == CDCadentialStates.PACArrival or self.CurrCadentialState == CDCadentialStates.PCCArrival:
-                self.PostCadenceMeasureCounter = 0
+                self.PostCadenceMeasureCounter = -1
 
     def getBassFromChord(self, chord):
-        retVal = 0
+        retVal = False
         if not chord.isRest:
-            if not retVal:
-                # also checking the bass part (even if it is not the lowest note in the chord)
-                for p in chord:
-                    if 'MyBasso' in p.groups:
-                        if retVal == 0 or p.pitch.midi < retVal.midi:
-                            retVal = p.pitch
-
-            # sometimes the labeling fails, then try lowest pitch while verifying an octave below soprano
-            if not retVal:
-                sorted_pitches = chord.sortFrequencyAscending().pitches
-                lowestPitch = sorted_pitches[0]
+            # first checking the bass part (even if it is not the lowest note in the chord)
+            for p in chord:
+                if 'MyBasso' in p.groups:
+                    if not retVal or p.pitch.midi < retVal.midi:
+                        retVal = p.pitch
+            # now checking the lowest pitch while verifying an octave below soprano
+            sorted_pitches = chord.sortFrequencyAscending().pitches
+            lowestPitch = sorted_pitches[0]
+            # if MyBasso not found or if it was found but it isn't the lowest pitch
+            if not retVal or retVal.midi > lowestPitch.midi:
                 highestPitch = sorted_pitches[-1]
-                if 'MySoprano' not in lowestPitch.groups and ((highestPitch.midi-lowestPitch.midi) > 11 or lowestPitch.midi <= 72):
+                if (highestPitch.midi-lowestPitch.midi) > 11:
                     retVal = lowestPitch
         return retVal
 
     def compareBassWithPitch(self,pitchClass):
-        #first try music21
-        #retVal = self.CurrHarmonicState.Chord.bass().pitchClass == pitchClass
         retVal = False
         #then try part labeling
         if not retVal:
@@ -328,7 +326,7 @@ class CDStateMachine(object):
                 curr_state = curr_state
             else:
                 # for the case where in IAC expected and dominant appears again, the back to Cad inevitable (TBD, separate these states)
-                if self.isDominantBass():
+                if self.isDominantBass() and not self.isTonicBass():
                     curr_state = CDCadentialStates.CadInevitable
                 elif self.isSecondaryDominantLeadingTone():# or (self.CurrHarmonicState.Key.mode=='major' and self.isSecondaryDominantUpperLeadingTone()): #this can create false HCs, need to consider non-cadential chromatic situations
                     curr_state = CDCadentialStates.HCArrivalExpected
@@ -392,7 +390,7 @@ class CDStateMachine(object):
                     if self.isDominantBass() and self.harmonyHasSeventh(): #V7, return to cad inevitable
                         curr_state = CDCadentialStates.CadInevitable
 
-                    elif self.isDominantBass() and self.CurrHarmonicState.ChordDegree == CDHarmonicChordDegrees.V.value and self.isRootedHarmony():# and self.harmonyHasThird():# V on strong beat while expecting - HC
+                    elif self.isDominantBass(): # and self.CurrHarmonicState.ChordDegree == CDHarmonicChordDegrees.V.value and self.isRootedHarmony():# and self.harmonyHasThird():# V on strong beat while expecting - HC
                         curr_state = CDCadentialStates.HCArrival
                         self.WeightOfLastCadence = self.tryGetBeatStrength()
 
@@ -513,6 +511,11 @@ class CDStateMachine(object):
             elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
                 # if alberti and weak beat do nothing
                 curr_state = curr_state
+            #elif self.tryGetBeatStrength() == 1: # new measure, either do cad inevitable or expected
+            #    if self.isDominantBass():
+            #        curr_state = CDCadentialStates.CadInevitable
+            #    else:
+            #        curr_state = CDCadentialStates.CadExpected
             else:
                 # == After HC we are still expecting a cadence, but we need to see how this does not create false positives
                 if self.isDominantBass():
@@ -551,8 +554,6 @@ class CDStateMachine(object):
         #==must check for change for flow debugging
         self.checkStateChanged()
 
-        self.updateCounters()
-
     def checkAppoggiatura(self, curr_state):
         if curr_state == CDCadentialStates.CadInevitable and (self.isSopraneOnDegree(7) or self.isSopraneOnDegree(2) or self.isSopraneOnDegree(3)):
             curr_state = CDCadentialStates.PACAppoggExpected
@@ -581,7 +582,7 @@ class CDStateMachine(object):
             # move to idle (confirming the PAC) and call update state again
             if MinPostCadenceMeasures > 0:
                 self.CurrCadentialState = CDCadentialStates.Idle
-                self.PostCadenceMeasureCounter = 0
+                # self.PostCadenceMeasureCounter = 0
             # if no minimum post cadence measures required, expect post cadential cadences
             else:
                 self.CurrCadentialState = CDCadentialStates.CadExpected
@@ -605,7 +606,7 @@ class CDStateMachine(object):
             self.MeasureCounter = self.MeasureCounter + 1
 
     def setCadenceOrPostCadence(self,Cadence):
-        if Cadence==CDCadentialStates.PACArrival and self.PostCadenceMeasureCounter <= MinPostCadenceMeasures:
+        if Cadence==CDCadentialStates.PACArrival and self.PostCadenceMeasureCounter < MinPostCadenceMeasures:
             state = CDCadentialStates.PCCArrival
         elif self.MeasureCounter <= MinInitialMeasures:
             state = CDCadentialStates.IACArrival
@@ -627,15 +628,15 @@ class CDStateMachine(object):
                 #Lyric = Lyric + str(self.CurrHarmonicState.ChordFigure)
 
             if self.getCadentialOutput() == CDCadentialStates.PACArrival:
-                Lyric = str(self.CurrHarmonicState.ChordFigure) + str(":PAC")
+                Lyric = str("PAC")
             elif self.getCadentialOutput() == CDCadentialStates.PCCArrival:
-                Lyric = str(self.CurrHarmonicState.ChordFigure) + str(":PCC")
+                Lyric = str("PCC")
             elif self.getCadentialOutput() == CDCadentialStates.IACArrival:
-                Lyric = str(self.CurrHarmonicState.ChordFigure) + str(":IAC")
+                Lyric = str("IAC")
             elif self.getCadentialOutput() == CDCadentialStates.HCArrival:
-                Lyric = str(self.CurrHarmonicState.ChordFigure) + str(":HC")
+                Lyric = str("HC")
             elif self.getCadentialOutput() == CDCadentialStates.CadAvoided:
-                Lyric = str(self.CurrHarmonicState.ChordFigure) + str(":CA")
+                Lyric = str("CA")
             elif not (self.getCadentialOutput() == CDCadentialStates.Idle):
                 Lyric = Lyric + self.TriggerString
 

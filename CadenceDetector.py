@@ -32,6 +32,8 @@ class CadenceDetector:
         self.PrevKeyString = []
         self.PrevChallengerKeyString = []
         self.OptionalKeysPerMeasure = [[]]
+        self.Parts = []
+        self.MeasuresPerPart = []
         self.NumMeasures = 0
         self.blockSize = 0
         self.overlap = 0
@@ -42,7 +44,7 @@ class CadenceDetector:
         self.KeyDetectionForgetFactor = 0.9
         self.RepeatedMeasureByVolta = []
         self.IncompleteMeasures = []
-        self.MeasureOffset = 0
+        self.EmptyMeasures = []
         self.ReenforcementFactors = []
         self.FinalBarlines = []
 
@@ -53,12 +55,14 @@ class CadenceDetector:
     def loadFileAndGetMeasures(self, fileString):
         print("Loading score...")
         self.NoteStream = m21.converter.parse(fileString)
-        self.NumMeasures = len(self.NoteStream.recurse().getElementsByClass('Measure'))
+        self.Parts = self.NoteStream.recurse().getElementsByClass(m21.stream.Part)
+        for part in self.Parts:
+            self.MeasuresPerPart.append(part.recurse().getElementsByClass(m21.stream.Measure))
+        self.NumMeasures = max([len(curr_part_measures) for curr_part_measures in self.MeasuresPerPart])
         self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
 
     def loadFile(self,fileString):
-        print("Loading score...")
-        self.NoteStream = m21.converter.parse(fileString)
+        self.loadFileAndGetMeasures(fileString)
         self.analyze()
 
     def analyze(self):
@@ -76,12 +80,12 @@ class CadenceDetector:
             self.HarmonicStateMachineChallenger.CheckBassPartFromChord = False
 
 
-        self.NumMeasures = len(self.ChordStream.recurse().getElementsByClass('Measure'))
+        self.NumMeasures = len(self.ChordStream.recurse().getElementsByClass(m21.stream.Measure))
         self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
         self.findVoltas()
         self.findFinalBarlines()
+        self.findEmptyMeasures()
         self.findIncompleteMeasures()
-        self.findMeasureOffset()
         self.NoteStreamRestless = copy.deepcopy(self.NoteStream)  #create new list so as not to alter the original stream
         self.replaceBassRestsWithPrevs()
         self.addMyLablesToParts(self.NoteStreamRestless)
@@ -97,8 +101,6 @@ class CadenceDetector:
         except:
             self.BassChords = parts[-1].chordify(removeRedundantPitches=False, copyPitches=False)
 
-
-
     def findVoltas(self):
         self.RepeatedMeasureByVolta = [0] * self.NumMeasures
         RepeatBrackets = self.NoteStream.recurse().getElementsByClass('RepeatBracket')
@@ -113,40 +115,46 @@ class CadenceDetector:
         for curr_barline in final_barlines:
             if curr_barline.type == 'final':
                 measureIndex = curr_barline.measureNumber - 1
-                if measureIndex < len(self.FinalBarlines):
-                   self.FinalBarlines[measureIndex] = 1
-
+                self.FinalBarlines[measureIndex] = 1
 
     def findIncompleteMeasures(self):
         print('Finding incomplete measures...')
         self.IncompleteMeasures = [0] * self.NumMeasures
         time_sig = []
+        measure_zero = self.ChordStream.measure(0)
+        if measure_zero:
+            for currSig in measure_zero.recurse().getElementsByClass(m21.meter.TimeSignature):
+                time_sig = currSig
         for i in range(self.NumMeasures): #enumerate(self.ChordStream.recurse().getElementsByClass(stream.Measure)):
-            measure = self.ChordStream.measures(i,i)
-            if i==36:
-                bla = 0
-            for timeSig in measure.recurse().getElementsByClass(m21.meter.TimeSignature):
-                time_sig = timeSig
-            chords = [chord for chord in measure.recurse().getElementsByClass('GeneralNote')]
-            if chords and not chords[-1].isRest: # this attemps to avoid false pickups (i.e. ignore cases where the rest is just not long enough) - not sure this is solid for all pickups
-                lengths = [chord.duration.quarterLength for chord in chords]
-                total_duration = sum(lengths)
-                epsilon = 0.1 # this epsilon is needed because of inaccuracy caused by decoration notes in some scores
-                if total_duration < (1 - epsilon) * time_sig.barDuration.quarterLength:
-                    self.IncompleteMeasures[i] = True
-        # use pickup detection from Haydn
-        self.IncompleteMeasures[0] = self.IncompleteMeasures[0] or self.hasPickupMeasure
+            measure = self.ChordStream.measure(i+1)
+            if measure:
+                if i==36:
+                    bla = 0
+                for timeSig in measure.recurse().getElementsByClass(m21.meter.TimeSignature):
+                    time_sig = timeSig
+                chords = [chord for chord in measure.recurse().getElementsByClass('GeneralNote')]
+                if chords and not chords[-1].isRest: # this attemps to avoid false pickups (i.e. ignore cases where the rest is just not long enough) - not sure this is solid for all pickups
+                    lengths = [chord.duration.quarterLength for chord in chords]
+                    total_duration = sum(lengths)
+                    epsilon = 0.1 # this epsilon is needed because of inaccuracy caused by decoration notes in some scores
+                    if total_duration < (1 - epsilon) * time_sig.barDuration.quarterLength:
+                        self.IncompleteMeasures[i] = True
+        # using pickup detection from Haydn, find first non-empty measure and set it incomplete there exists a pickup
+        first_non_empty_measure = self.EmptyMeasures.index(0)
+        self.IncompleteMeasures[first_non_empty_measure] = self.IncompleteMeasures[first_non_empty_measure] or self.hasPickupMeasure
         incomplete_measures = [i+1 for i,inc in enumerate(self.IncompleteMeasures) if inc]
         print('Incomplete meaures:', incomplete_measures)
 
 
-    def findMeasureOffset(self):
-        for i in range(0,self.NumMeasures):
-            curr_measure = self.ChordStream.measures(i,i)
-            if len(curr_measure.recurse().notesAndRests) == 0:
-                self.MeasureOffset = self.MeasureOffset + 1
-            else:
-                break
+    def findEmptyMeasures(self):
+        print('Finding empty measures...')
+        self.EmptyMeasures = [0] * self.NumMeasures
+        for i in range(self.NumMeasures):
+            curr_measure = self.ChordStream.measure(i+1)
+            if curr_measure and len(curr_measure.recurse().notesAndRests) == 0:
+                self.EmptyMeasures[i] = 1
+        empty_measures = [i + 1 for i, emp in enumerate(self.EmptyMeasures) if emp]
+        print('Empty measures:', empty_measures)
 
 
     def removePickupMeasure(self):
@@ -160,10 +168,9 @@ class CadenceDetector:
 
     def addMyLablesToParts(self, note_stream):
         parts = note_stream.recurse().getElementsByClass(m21.stream.Part)
-        # for quartets, assuming soprano is first and bass last, remaining parts are not accessed individually
-        if len(parts) > 2:
-            parts[0].id = 'MySoprano'
-            parts[-1].id = 'MyBasso'
+        # for more than one voice, assuming soprano is first and bass last, remaining parts are not accessed individually
+        parts[0].id = 'MySoprano'
+        parts[-1].id = 'MyBasso'
 
     def tryIsChord(x, self):
         try:
@@ -471,20 +478,31 @@ class CadenceDetector:
         Music21StringMode = SearStringMode.replace("M","m")
         return m21.key.Key(Music21StringKey,Music21StringMode)
 
-    def isUpwardArpeggioPattern(self, pitches, arp_len):
+    def isArpeggioPattern(self, pitches, arp_len, up_down=None):
         if len(pitches) < arp_len:
             retVal = False
         else:
             retVal = True
-            if all(x.midi > pitches[0].midi for x in pitches[1:]):
-                prev_pitch = []
-                for p in pitches:
-                    if prev_pitch and (p.midi - prev_pitch.midi) < 3: #minor and major second disqualifies the arpeggio
-                        retVal = False
-                        break
-                    prev_pitch = p
-            else:
-                retVal = False
+            if up_down == 'up':
+                if all(x.midi > pitches[0].midi for x in pitches[1:]):
+                    prev_pitch = []
+                    for p in pitches:
+                        if prev_pitch and (p.midi - prev_pitch.midi) < 3: #minor and major second disqualifies the arpeggio
+                            retVal = False
+                            break
+                        prev_pitch = p
+                else:
+                    retVal = False
+            elif up_down == 'down':
+                if all(x.midi < pitches[0].midi for x in pitches[1:]):
+                    prev_pitch = []
+                    for p in pitches:
+                        if prev_pitch and (prev_pitch.midi - p.midi) < 3: #minor and major second disqualifies the arpeggio
+                            retVal = False
+                            break
+                        prev_pitch = p
+                else:
+                    retVal = False
         return retVal
 
     def isAlbertiPattern(self, pitches, pattern_len):
@@ -547,7 +565,7 @@ class CadenceDetector:
             if beat + arp_len <= len(measure_general_notes):
                 subsec = lowest_pitches[beat:beat+arp_len]
                 if None not in subsec:
-                    isArp = self.isUpwardArpeggioPattern(subsec, arp_len)
+                    isArp = self.isArpeggioPattern(subsec, arp_len, 'up') #or self.isArpeggioPattern(subsec, arp_len, 'down')
                     #keep first beat in pattern as non arpeggio
                     arpeggioBeats[beat+1:beat+arp_len] = [isArp] * (arp_len - 1)
         return arpeggioBeats
@@ -576,6 +594,7 @@ class CadenceDetector:
         fileName = self.fileName.replace(".", "_")
         FullPath = os.path.join(self.WritePath, fileName)
         text_file = open(f"{FullPath}_Analyzed.txt", "w")
+        print(f"NumMeasures: {self.NumMeasures}", file=text_file)
         text_fileOffsets = open(f"{FullPath}_Analyzed_OffsetsNums.txt", "w")
         text_fileTransitions = open(f"{FullPath}_Analyzed_Transitions.txt", "w")
 
@@ -584,43 +603,50 @@ class CadenceDetector:
         prevState = []
         repeat_counter = 0
         incomplete_counter = 0
-
+        empty_measure_counter = 0
         coefs_per_measure = []
+
+        # check first timesig
+        measure_zero = self.ChordStream.measure(0)
+        curr_time_sig = self.check_and_update_timesig(measure_zero, [])
 
         for currMeasureIndex in range(0,self.NumMeasures):
         #for currMeasureIndex, (CurrMeasuresRestless,CurrMeasures, CurrMeasuresNotes, CurrMeasureBass) in enumerate(zip(self.ChordStreamRestless.recurse().getElementsByClass(stream.Measure), self.ChordStream.recurse().getElementsByClass(stream.Measure), self.NoteStream.recurse().getElementsByClass(stream.Measure),self.BassChords.recurse().getElementsByClass(stream.Measure))):
             # debug per measure
-            if currMeasureIndex == 18:
+            if currMeasureIndex == 33:
                 bla = 0
 
-            if currMeasureIndex > self.NumMeasures - 1:
-                print('reached num measures, stopping processing')
-                break
+            # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
+            # for example data that originates from midi cannot contain this info
+            # to overcome this, we attempt to find the pickup via initial rests and discard it
+            # also, we count the empty measures and index them out while writing the label
+            measure_number = currMeasureIndex + 1
+            CurrMeasuresRestless = self.ChordStreamRestless.measure(measure_number)
+            CurrMeasures = self.ChordStream.measure(measure_number)
+            CurrMeasuresNotes = self.NoteStream.measure(measure_number)
+            CurrMeasureBass = self.BassChords.measure(measure_number)
+
+            # check and update timesig
+            curr_time_sig = self.check_and_update_timesig(CurrMeasures, curr_time_sig)
 
             # reset state machines after repeat brackets (TBD  - add double barlines to this)
-            if currMeasureIndex > 0 and self.FinalBarlines[currMeasureIndex - incomplete_counter - 1]:
+            if currMeasureIndex > 0 and self.FinalBarlines[currMeasureIndex-1]:
                 self.HarmonicStateMachine.reset()
                 self.HarmonicStateMachineChallenger.reset()
 
-            if self.IncompleteMeasures[currMeasureIndex]:
-                incomplete_counter = incomplete_counter + 1
+            if self.EmptyMeasures[currMeasureIndex]:
+                empty_measure_counter = empty_measure_counter + 1
                 continue
 
-            corrected_index = currMeasureIndex + self.MeasureOffset
-            CurrMeasuresRestless = self.ChordStreamRestless.measures(corrected_index,corrected_index)#measures start with 1 in haydn corpus
-            CurrMeasures = self.ChordStream.measures(corrected_index,corrected_index)  # measures start with in haydn corpus
-            CurrMeasuresNotes = self.NoteStream.measures(corrected_index, corrected_index)
-            CurrMeasureBass = self.BassChords.measures(corrected_index, corrected_index)
+            if self.IncompleteMeasures[currMeasureIndex]:
+                incomplete_counter = incomplete_counter + 1
 
-            #check and update timesig
-            for timeSig in CurrMeasures.recurse().getElementsByClass(m21.meter.TimeSignature):
-                if timeSig != self.HarmonicStateMachine.CurrHarmonicState.TimeSig:
-                    self.HarmonicStateMachine.CurrHarmonicState.TimeSig = timeSig
-                    self.HarmonicStateMachineChallenger.CurrHarmonicState.TimeSig = timeSig
+            if not CurrMeasures:
+                continue
 
             AlbertiBeats4 = self.detectAlbertiBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=4)
             AlbertiBeats = AlbertiBeats4
-            if timeSig.ratioString in ['3/4','6/8','3/8']:
+            if curr_time_sig.ratioString in ['3/4','6/8','3/8']:
                 AlbertiBeats6 = self.detectAlbertiBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=6)
                 AlbertiBeats = [x or y for (x, y) in zip(AlbertiBeats4, AlbertiBeats6)]
 
@@ -683,7 +709,7 @@ class CadenceDetector:
                             self.reenforceKeyByFactor(currKeyString, self.ReenforcementFactors[cad])
                         # Challenger Check (for key switching, but ignore HCs in subdominant key (becuase they are more likely PACs in main key))
                         if cad in LyricChallenger:
-                            reenforce =  not (challengerKey.tonic.pitchClass == self.getSubDominantPitchClass(currKey) and (cad == 'HC'))
+                            reenforce =  not (challengerKey.tonic.pitchClass == self.getSubDominantPitchClass(currKey) and (cad == 'HC')) # and not (challengerKey.tonic.pitchClass == currKey.getDominant().pitchClass and (cad == 'PAC'))
                             if reenforce:
                                 self.reenforceKeyByFactor(challengerKeyString, self.ReenforcementFactors[cad])
                                 resort = True
@@ -724,13 +750,16 @@ class CadenceDetector:
                     elif "PCC" in Lyric:
                         CadString = "PCC"
                     CadStringToNumMap = {"PAC": CDCadentialStates.PACArrival.value, "IAC": CDCadentialStates.IACArrival.value, "HC": CDCadentialStates.HCArrival.value, "PCC": CDCadentialStates.PCCArrival.value}
-                    measure_to_write = currMeasureIndex + 1 - incomplete_counter - repeat_counter
-                    repeat_counter = repeat_counter + self.RepeatedMeasureByVolta[currMeasureIndex]
+                    # incomplete and empty counters count measures that should be discarded
+                    measure_to_write = measure_number - self.hasPickupMeasure - empty_measure_counter
                     print('Measure ', measure_to_write, ' offset ', measuresSecondsMap[currMeasureIndex]['offsetSeconds'], " ", Lyric)
                     print(f"Measure: {measure_to_write} Offset: {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {Lyric}", file=text_file)
                     print(f"{measure_to_write} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {CadStringToNumMap[CadString]}", file=text_fileOffsets)
                 elif "Key" in Lyric:
                     print(Lyric)
+
+            # ONLY NOW update repeat counter!!
+            repeat_counter = repeat_counter + self.RepeatedMeasureByVolta[currMeasureIndex]
 
                 # save transitions to file regardless of Lyrics
                 # if prevState != self.HarmonicStateMachine.getCadentialOutput().value:
@@ -750,9 +779,9 @@ class CadenceDetector:
             coefs_per_measure.append(copy.deepcopy(self.CurrSmoothedInterpretations))
 
             Parts = CurrMeasuresNotes.recurse().getElementsByClass(m21.stream.Part)
-            Lyrics_to_filter = [] # for filtering certain lyrics
+            Lyrics_to_filter = ['IAC', 'CA'] # for filtering the display
             for thisLyric in LyricPerBeat:
-                if thisLyric not in Lyrics_to_filter:
+                if thisLyric[1] not in Lyrics_to_filter:
                     found = 0
                     for index in range(0, self.NumParts):
                         for thisNote in Parts[-1-index].flat.notesAndRests:  # adding lyric from last part up, assuming its the bass line
@@ -788,6 +817,15 @@ class CadenceDetector:
             with open(CoefsFile, 'wb') as f:
                 pickle.dump(coefs_per_measure, f)
 
+    def check_and_update_timesig(self, CurrMeasures, measure_time_sig):
+        if CurrMeasures:
+            for timeSig in CurrMeasures.recurse().getElementsByClass(m21.meter.TimeSignature):
+                measure_time_sig = timeSig
+                if timeSig != self.HarmonicStateMachine.CurrHarmonicState.TimeSig:
+                    self.HarmonicStateMachine.CurrHarmonicState.TimeSig = timeSig
+                    self.HarmonicStateMachineChallenger.CurrHarmonicState.TimeSig = timeSig
+        return measure_time_sig
+
     def getSubDominantPitchClass(self, currKey):
         return (currKey.getDominant().pitchClass - 2) % 12
 
@@ -811,10 +849,13 @@ class CadenceDetector:
         self.ChordStream.show()
 
     def writeAnalyzedFile(self):
-        fileName = self.fileName.replace(".", "_")
-        fileName = (f"{fileName}_Analyzed.xml")
-        FullPath = os.path.join(self.WritePath, fileName)
-        self.NoteStream.write(fp=FullPath)
+        if self.NumMeasures <= 300:
+            fileName = self.fileName.replace(".", "_")
+            fileName = (f"{fileName}_Analyzed.xml")
+            FullPath = os.path.join(self.WritePath, fileName)
+            self.NoteStream.write(fp=FullPath)
+        else:
+            print('file too long for writing. Num measures:', self.NumMeasures)
 
     def displayFull(self):
         self.NoteStream.show()
