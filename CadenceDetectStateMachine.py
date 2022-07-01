@@ -4,6 +4,7 @@ import copy
 
 class CDStateMachine(object):
     def __init__(self):
+        self.NumParts = 0
         self.reset()
 
     def reset(self):
@@ -94,16 +95,15 @@ class CDStateMachine(object):
         if not isinstance(deg, list):
             deg = [deg]
         for curr_deg in deg:
-            if self.CurrHarmonicState.Chord.pitches[-1].pitchClass == self.CurrHarmonicState.Key.pitchFromDegree(curr_deg).pitchClass:
-                 retVal = 1
-                 #check for voice crossing of other voices
-            elif self.CurrHarmonicState.Chord.sortFrequencyAscending().pitches[-1].pitchClass == self.CurrHarmonicState.Key.pitchFromDegree(curr_deg).pitchClass:
-                 retVal = 1
-            else:
-                for p in self.CurrHarmonicState.Chord.pitches:
-                    if p.pitchClass == self.CurrHarmonicState.Key.pitchFromDegree(curr_deg).pitchClass and 'MySoprano' in p.groups:
-                        retVal = 1
-                        break
+            target_pitch_class = self.CurrHarmonicState.Key.pitchFromDegree(curr_deg).pitchClass
+            if self.CurrHarmonicState.Chord.pitches[-1].pitchClass == target_pitch_class:
+                retVal = 1
+                #check for voice crossing of other voices
+            elif self.CurrHarmonicState.Chord.sortFrequencyAscending().pitches[-1].pitchClass == target_pitch_class:
+                retVal = 1
+                #in multipart scores, check for explicit soprano
+            elif self.NumParts > 2 and self.getCurrSopranoPitch().pitchClass == target_pitch_class:
+                retVal = 1
             if retVal:
                 break
         return retVal

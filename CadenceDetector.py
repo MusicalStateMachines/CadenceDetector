@@ -60,6 +60,8 @@ class CadenceDetector:
             self.MeasuresPerPart.append(part.recurse().getElementsByClass(m21.stream.Measure))
         self.NumMeasures = max([len(curr_part_measures) for curr_part_measures in self.MeasuresPerPart])
         self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
+        # do some other quick analysis for debugging without full cadence detection
+        # self.findVoltas()
 
     def loadFile(self,fileString):
         self.loadFileAndGetMeasures(fileString)
@@ -88,6 +90,8 @@ class CadenceDetector:
         self.findIncompleteMeasures()
         self.NoteStreamRestless = copy.deepcopy(self.NoteStream)  #create new list so as not to alter the original stream
         self.replaceBassRestsWithPrevs()
+        self.HarmonicStateMachine.NumParts = self.NumParts
+        self.HarmonicStateMachineChallenger.NumParts = self.NumParts
         self.addMyLablesToParts(self.NoteStreamRestless)
         if self.HarmonicStateMachine.CheckBassPartFromChord==True:
             self.ChordStreamRestless = self.NoteStreamRestless.chordify(addPartIdAsGroup=True, removeRedundantPitches=False, copyPitches=False)
@@ -613,7 +617,7 @@ class CadenceDetector:
         for currMeasureIndex in range(0,self.NumMeasures):
         #for currMeasureIndex, (CurrMeasuresRestless,CurrMeasures, CurrMeasuresNotes, CurrMeasureBass) in enumerate(zip(self.ChordStreamRestless.recurse().getElementsByClass(stream.Measure), self.ChordStream.recurse().getElementsByClass(stream.Measure), self.NoteStream.recurse().getElementsByClass(stream.Measure),self.BassChords.recurse().getElementsByClass(stream.Measure))):
             # debug per measure
-            if currMeasureIndex == 33:
+            if currMeasureIndex == 80:
                 bla = 0
 
             # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
