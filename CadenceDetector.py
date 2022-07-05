@@ -71,13 +71,14 @@ class CadenceDetector:
         self.removeChordSymbolsInNoteStream()
         self.removePickupMeasure()
         self.addMyLablesToParts(self.NoteStream)
+        NoteStreamNoGrace = self.removeGraceNotes(self.NoteStream)
         try:
-            self.ChordStream = self.NoteStream.chordify(addPartIdAsGroup=True, removeRedundantPitches=False, copyPitches=False)
+            self.ChordStream = NoteStreamNoGrace.chordify(addPartIdAsGroup=True, removeRedundantPitches=False, copyPitches=False)
             self.HarmonicStateMachine.CheckBassPartFromChord = True
             self.HarmonicStateMachineChallenger.CheckBassPartFromChord = True
         except:
             print("Cannot add parts to chords!!")
-            self.ChordStream = self.NoteStream.chordify(removeRedundantPitches=False, copyPitches=False)
+            self.ChordStream = NoteStreamNoGrace.chordify(removeRedundantPitches=False, copyPitches=False)
             self.HarmonicStateMachine.CheckBassPartFromChord = False
             self.HarmonicStateMachineChallenger.CheckBassPartFromChord = False
 
@@ -93,17 +94,19 @@ class CadenceDetector:
         self.HarmonicStateMachine.NumParts = self.NumParts
         self.HarmonicStateMachineChallenger.NumParts = self.NumParts
         self.addMyLablesToParts(self.NoteStreamRestless)
+        NoteStreamRestlessNoGrace = self.removeGraceNotes(self.NoteStreamRestless)
         if self.HarmonicStateMachine.CheckBassPartFromChord==True:
-            self.ChordStreamRestless = self.NoteStreamRestless.chordify(addPartIdAsGroup=True, removeRedundantPitches=False, copyPitches=False)
+            self.ChordStreamRestless = NoteStreamRestlessNoGrace.chordify(addPartIdAsGroup=True, removeRedundantPitches=False, copyPitches=False)
         else:
-            self.ChordStreamRestless = self.NoteStreamRestless.chordify(removeRedundantPitches=False, copyPitches=False)
+            self.ChordStreamRestless = NoteStreamRestlessNoGrace.chordify(removeRedundantPitches=False, copyPitches=False)
 
         #chordifying only bass part
         parts = self.NoteStream.recurse().getElementsByClass(m21.stream.Part)
+        BassPartNoGrace = self.removeGraceNotes(parts[-1])
         try:
-            self.BassChords = parts[-1].chordify(addPartIdAsGroup=True, removeRedundantPitches=False, copyPitches=False)
+            self.BassChords = BassPartNoGrace.chordify(addPartIdAsGroup=True, removeRedundantPitches=False, copyPitches=False)
         except:
-            self.BassChords = parts[-1].chordify(removeRedundantPitches=False, copyPitches=False)
+            self.BassChords = BassPartNoGrace.chordify(removeRedundantPitches=False, copyPitches=False)
 
     def findVoltas(self):
         self.RepeatedMeasureByVolta = [0] * self.NumMeasures
@@ -176,6 +179,17 @@ class CadenceDetector:
         parts[0].id = 'MySoprano'
         parts[-1].id = 'MyBasso'
 
+    def removeGraceNotes(self, note_stream):
+        # remove grace notes
+        note_stream = copy.deepcopy(note_stream)
+        graceNotes = []
+        for n in note_stream.recurse().notes:
+            if n.duration.isGrace:
+                graceNotes.append(n)
+        for grace in graceNotes:
+            grace.activeSite.remove(grace)
+        return note_stream
+    
     def tryIsChord(x, self):
         try:
             return x.isChord
@@ -617,11 +631,11 @@ class CadenceDetector:
         for currMeasureIndex in range(0,self.NumMeasures):
         #for currMeasureIndex, (CurrMeasuresRestless,CurrMeasures, CurrMeasuresNotes, CurrMeasureBass) in enumerate(zip(self.ChordStreamRestless.recurse().getElementsByClass(stream.Measure), self.ChordStream.recurse().getElementsByClass(stream.Measure), self.NoteStream.recurse().getElementsByClass(stream.Measure),self.BassChords.recurse().getElementsByClass(stream.Measure))):
             # debug per measure
-            if currMeasureIndex == 80:
+            if currMeasureIndex == 91:
                 bla = 0
 
             # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
-            # for example data that originates from midi cannot contain this info
+            # for example, data that originates from midi cannot contain this info
             # to overcome this, we attempt to find the pickup via initial rests and discard it
             # also, we count the empty measures and index them out while writing the label
             measure_number = currMeasureIndex + 1
