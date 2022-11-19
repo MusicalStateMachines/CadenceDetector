@@ -56,10 +56,14 @@ class CadenceDetector:
         print("Loading score...")
         self.NoteStream = m21.converter.parse(fileString)
         self.Parts = self.NoteStream.recurse().getElementsByClass(m21.stream.Part)
+        self.NumParts = len(self.Parts)
         for part in self.Parts:
             self.MeasuresPerPart.append(part.recurse().getElementsByClass(m21.stream.Measure))
         self.NumMeasures = max([len(curr_part_measures) for curr_part_measures in self.MeasuresPerPart])
         self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
+        #update some data to state machines
+        self.HarmonicStateMachine.NumParts = self.NumParts
+        self.HarmonicStateMachineChallenger.NumParts = self.NumParts
         # do some other quick analysis for debugging without full cadence detection
         # self.findVoltas()
 
@@ -90,9 +94,7 @@ class CadenceDetector:
         self.findEmptyMeasures()
         self.findIncompleteMeasures()
         self.NoteStreamRestless = copy.deepcopy(self.NoteStream)  #create new list so as not to alter the original stream
-        self.replaceBassRestsWithPrevs()
-        self.HarmonicStateMachine.NumParts = self.NumParts
-        self.HarmonicStateMachineChallenger.NumParts = self.NumParts
+        self.replaceBassRestsWithPrevsViaSecondsMaps()
         self.addMyLablesToParts(self.NoteStreamRestless)
         NoteStreamRestlessNoGrace = self.removeGraceNotes(self.NoteStreamRestless)
         if self.HarmonicStateMachine.CheckBassPartFromChord==True:
@@ -107,6 +109,86 @@ class CadenceDetector:
             self.BassChords = BassPartNoGrace.chordify(addPartIdAsGroup=True, removeRedundantPitches=False, copyPitches=False)
         except:
             self.BassChords = BassPartNoGrace.chordify(removeRedundantPitches=False, copyPitches=False)
+
+        self.findGroupLimitsViaSecondsMap()
+
+    def findGroupLimits(self):
+        for part in self.Parts:
+            prev_note = []
+            prev_diff = []
+            prev_measure = []
+            for curr_measure in part.recurse().getElementsByClass(m21.stream.Measure):
+                first_note_in_measure = True
+                for curr_note in curr_measure.recurse().getElementsByClass(m21.note.Note):
+                    if curr_note.tie and not curr_note.tie == m21.tie.Tie('start'):
+                        continue
+                    if prev_note:
+                        curr_diff = curr_note.offset - prev_note.offset
+                        if first_note_in_measure and prev_measure: # first note but not first measure, complete previous measure
+                            curr_diff += prev_measure.duration.quarterLength
+                        if prev_diff:
+                            # long note groups backward with previous shorter notes, adding epsilon becuase they may be different due to fraction inaccuracy
+                            # also close grouping on very long notes (longer than a measure)
+                            epsilon = 0.001
+                            if (curr_diff > prev_diff + epsilon) or curr_diff >= curr_measure.duration.quarterLength:
+                                prev_note.groups.append('}')
+                                curr_note.groups.append('{')
+                        prev_diff = curr_diff
+                    else: # first note of work
+                        curr_note.groups.append('{')
+                    prev_note = curr_note
+                    first_note_in_measure = False
+                prev_measure = curr_measure
+            # always mark last note in part
+            if prev_note:
+                prev_note.groups.append('}')
+            # add grouping lyrics for debug
+            for note in part.recurse().getElementsByClass(m21.note.Note):
+                note.lyric = ' '.join(note.groups)
+
+    def findGroupLimitsViaSecondsMap(self):
+        for part in self.Parts:
+            prev_secondsDict = prev_note = prev_diff = []
+            part_measures_secondsMap = sorted(part.recurse().getElementsByClass(m21.stream.Measure).secondsMap, key=lambda d: d['offsetSeconds'])
+            part_notes_secondsMap = sorted(part.recurse().notesAndRests.secondsMap, key=lambda d: d['offsetSeconds'])
+            for secondsDict in part_notes_secondsMap:
+                curr_note = secondsDict['element']
+                if curr_note.tie and not curr_note.tie == m21.tie.Tie('start'):
+                    continue
+                if prev_secondsDict:
+                    curr_diff = secondsDict['offsetSeconds'] - prev_secondsDict['offsetSeconds']
+                    if curr_diff <= 0:
+                        continue
+                    prev_note = prev_secondsDict['element']
+                    if (prev_note.isRest and curr_note.isRest): # no grouping on consecutive rests
+                        pass
+                    elif not prev_note.isRest and curr_note.isRest:
+                        prev_note.groups.append('}')
+                    elif prev_note.isRest and not curr_note.isRest:
+                        curr_note.groups.append('{')
+                    elif prev_diff:
+                        # long note groups backward with previous shorter notes
+                        # also close grouping on very long notes (longer than a measure)
+                        # epsilon and frac needed because they may be different due to fraction and measure duration inaccuracy
+                        epsilon = 0.001
+                        frac = 0.9
+                        # === debug per measure
+                        if curr_note.measureNumber and curr_note.measureNumber==66:
+                            bla = 0
+                        if (curr_diff > prev_diff + epsilon) or (prev_note.measureNumber and curr_diff >= frac * part_measures_secondsMap[prev_note.measureNumber-1]['durationSeconds']):
+                            prev_note.groups.append('}')
+                            curr_note.groups.append('{')
+                    prev_diff = curr_diff
+                else:  # first note of work
+                    curr_note.groups.append('{')
+                prev_secondsDict = secondsDict
+            # always mark last note in part
+            if prev_note:
+                prev_note.groups.append('}')
+            # add grouping lyrics for debug
+            for note in part.recurse().getElementsByClass(m21.note.GeneralNote):
+                note.lyric = ' '.join(note.groups)
+
 
     def findVoltas(self):
         self.RepeatedMeasureByVolta = [0] * self.NumMeasures
@@ -189,7 +271,7 @@ class CadenceDetector:
         for grace in graceNotes:
             grace.activeSite.remove(grace)
         return note_stream
-    
+
     def tryIsChord(x, self):
         try:
             return x.isChord
@@ -223,7 +305,9 @@ class CadenceDetector:
                 continue
             prev_note = []
             measure_modifcations_list = []
-            for curr_measure in curr_part.recurse().getElementsByClass(m21.stream.Measure):
+            for i,curr_measure in enumerate(curr_part.recurse().getElementsByClass(m21.stream.Measure)):
+                if i==55:
+                    bla = 0
                 if len(measure_modifcations_list) > 0: # only complete one measure forward
                     prev_note = []
                 measure_modifcations_list = []
@@ -245,6 +329,75 @@ class CadenceDetector:
                     curr_measure.replace(curr_mod[0], curr_mod[1])
 
         #self.NoteStreamRestless.show()
+
+    def replaceBassRestsWithPrevsViaSecondsMaps(self):
+        max_consec_empty_meas = 1
+        prev_note = []
+        prev_measure_dur = []
+        consecutive_empty_measure_durations = []
+        parts = self.NoteStreamRestless.recurse().getElementsByClass(m21.stream.Part)
+        for curr_measure in parts[-1].recurse().getElementsByClass(m21.stream.Measure):
+            notes_in_measure = 0
+            measure_modifcations_list = []
+            #find rest and create modifications
+            sortedSecondsMaps = sorted(curr_measure.recurse().secondsMap, key=lambda d: d['offsetSeconds'])
+            for curr_item in sortedSecondsMaps:
+                #only notes, chords, and rests have durations
+                if not curr_item['durationSeconds'] > 0:
+                    continue
+                if curr_item['element'].isRest:# found rest, remove it but not after one measure
+                    if prev_note and (notes_in_measure > 0 or len(consecutive_empty_measure_durations) <= max_consec_empty_meas):
+                        measure_modifcations_list.append(curr_item['element'])
+                else: # note or chord
+                    if not prev_note:
+                        prev_note = curr_item
+                    else: # not a rest and prev_note exists
+                        if notes_in_measure > 0 and (curr_item['element'].offset == prev_note['element'].offset or curr_item['endTimeSeconds'] == prev_note['endTimeSeconds']):# if has same offset but lower bass update new curr item without changing duration
+                            curr_lowest_pitch = curr_item['element'].sortFrequencyAscending().pitches[0] if curr_item['element'].isChord else curr_item['element'].pitch
+                            prev_lowest_pitch = prev_note['element'].sortFrequencyAscending().pitches[0] if prev_note['element'].isChord else prev_note['element'].pitch
+                            if curr_lowest_pitch.midi < prev_lowest_pitch.midi:
+                                prev_note = curr_item
+                        else: # found note or chord with new offset, extend duration till this note
+                            curr_offset = curr_item['element'].offset
+                            prev_offset = prev_note['element'].offset
+                            extended_quarterLength = curr_offset - prev_offset
+                            if notes_in_measure == 0 and prev_measure_dur: # first note in measure, complete previous measure
+                                extended_quarterLength += prev_measure_dur
+                            # now complete the empty measues (if exist)
+                            extended_quarterLength += np.sum([dur for dur in consecutive_empty_measure_durations])
+                            if extended_quarterLength > prev_note['element'].quarterLength and (notes_in_measure > 0 or len(consecutive_empty_measure_durations) <= max_consec_empty_meas):
+                                prev_note['element'].duration = m21.duration.Duration(extended_quarterLength)
+                                prev_note['element'].quarterLength = extended_quarterLength
+                            prev_note = curr_item
+                    notes_in_measure += 1
+                    consecutive_empty_measure_durations = []
+            #extend last note to complete measure
+            if prev_note and notes_in_measure > 0:
+                remainder = curr_measure.duration.quarterLength - prev_note['element'].offset
+                if remainder > prev_note['element'].quarterLength:
+                    prev_note['element'].duration = m21.duration.Duration(remainder)
+                    prev_note['element'].quarterLength = remainder
+            # check for final barline
+            if curr_measure.rightBarline and curr_measure.rightBarline.type == 'final':
+                prev_note = []
+            # check if measure was empty
+            if notes_in_measure == 0 and prev_note:
+                consecutive_empty_measure_durations.append(curr_measure.duration.quarterLength)
+            prev_measure_dur = curr_measure.duration.quarterLength
+            # make erase modifications to measure
+            curr_measure.remove(measure_modifcations_list, recurse=True)
+        # making ties for notes extending beyond measure
+        #self.NoteStreamRestless.makeMeasures(inPlace=True)
+        try:
+            self.NoteStreamRestless.parts[-1].recurse().makeTies(inPlace=True)
+        except:
+            print(f'makeTies failed')
+        #try:
+        #    self.NoteStreamRestless.recurse().makeTies(inPlace=True)
+        #except:
+        #    print(f'makeTies failed on full stream, trying only on bass part')
+        #    self.NoteStreamRestless.parts[-1].recurse().makeTies(inPlace=True)
+
 
     def noteFromRestWithPitch(self,rest,pitch):
         noteFromRest = m21.note.Note(pitch)
@@ -540,15 +693,6 @@ class CadenceDetector:
                 lowestPitches.append(None)
         return lowestPitches
 
-    def getBassFromChord(self, chord):
-        retVal = 0
-        if not retVal:
-            # also checking the bass part (even if it is not the lowest note in the chord)
-            for p in chord:
-                if 'MyBasso' in p.groups:
-                    if retVal == 0 or p.pitch.midi < retVal.midi:
-                        retVal = p.pitch
-
     def detectAlbertiBassInMeasure(self, measure_chords, bass_chords, pattern_len):
         #first exact bassline from chords
         measure_general_notes = measure_chords.recurse().getElementsByClass('GeneralNote')
@@ -607,6 +751,12 @@ class CadenceDetector:
         return TopNKeys
 
 
+    def getNotesPerChordBeatPerPart(self, ChordsMeasure, NotesMeasure):
+        Parts = NotesMeasure.recurse().getElementsByClass(m21.stream.Part)
+        notesPerChordBeatPerPart = [[[real_note for real_note in part.flat.notes if (chord.beat == real_note.beat and (real_note.isNote or real_note.isChord))] for part in Parts] for chord in ChordsMeasure.recurse().getElementsByClass('GeneralNote')]
+        return notesPerChordBeatPerPart
+
+
     def detectCadences(self):
         print("Detecting cadences...")
         fileName = self.fileName.replace(".", "_")
@@ -628,193 +778,199 @@ class CadenceDetector:
         measure_zero = self.ChordStream.measure(0)
         curr_time_sig = self.check_and_update_timesig(measure_zero, [])
 
-        for currMeasureIndex in range(0,self.NumMeasures):
-        #for currMeasureIndex, (CurrMeasuresRestless,CurrMeasures, CurrMeasuresNotes, CurrMeasureBass) in enumerate(zip(self.ChordStreamRestless.recurse().getElementsByClass(stream.Measure), self.ChordStream.recurse().getElementsByClass(stream.Measure), self.NoteStream.recurse().getElementsByClass(stream.Measure),self.BassChords.recurse().getElementsByClass(stream.Measure))):
-            # debug per measure
-            if currMeasureIndex == 91:
-                bla = 0
+        # loop on measures:
+        try:
+            for currMeasureIndex in range(0,self.NumMeasures):
+                # debug per measure
+                if currMeasureIndex == 4:
+                    bla = 0
+                # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
+                # for example, data that originates from midi cannot contain this info
+                # to overcome this, we attempt to find the pickup via initial rests and discard it
+                # also, we count the empty measures and index them out while writing the label
+                measure_number = currMeasureIndex + 1
+                # print(f"measure number {measure_number}")
+                CurrMeasuresRestless = self.ChordStreamRestless.measure(measure_number)
+                CurrMeasures = self.ChordStream.measure(measure_number)
+                CurrMeasuresNotes = self.NoteStream.measure(measure_number)
+                CurrMeasureBass = self.BassChords.measure(measure_number)
 
-            # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
-            # for example, data that originates from midi cannot contain this info
-            # to overcome this, we attempt to find the pickup via initial rests and discard it
-            # also, we count the empty measures and index them out while writing the label
-            measure_number = currMeasureIndex + 1
-            CurrMeasuresRestless = self.ChordStreamRestless.measure(measure_number)
-            CurrMeasures = self.ChordStream.measure(measure_number)
-            CurrMeasuresNotes = self.NoteStream.measure(measure_number)
-            CurrMeasureBass = self.BassChords.measure(measure_number)
+                # check and update timesig
+                curr_time_sig = self.check_and_update_timesig(CurrMeasures, curr_time_sig)
 
-            # check and update timesig
-            curr_time_sig = self.check_and_update_timesig(CurrMeasures, curr_time_sig)
+                # reset state machines after repeat brackets (TBD  - add double barlines to this)
+                if currMeasureIndex > 0 and self.FinalBarlines[currMeasureIndex-1]:
+                    self.HarmonicStateMachine.reset()
+                    self.HarmonicStateMachineChallenger.reset()
 
-            # reset state machines after repeat brackets (TBD  - add double barlines to this)
-            if currMeasureIndex > 0 and self.FinalBarlines[currMeasureIndex-1]:
-                self.HarmonicStateMachine.reset()
-                self.HarmonicStateMachineChallenger.reset()
+                if self.EmptyMeasures[currMeasureIndex]:
+                    empty_measure_counter = empty_measure_counter + 1
+                    continue
 
-            if self.EmptyMeasures[currMeasureIndex]:
-                empty_measure_counter = empty_measure_counter + 1
-                continue
+                if self.IncompleteMeasures[currMeasureIndex]:
+                    incomplete_counter = incomplete_counter + 1
 
-            if self.IncompleteMeasures[currMeasureIndex]:
-                incomplete_counter = incomplete_counter + 1
+                if not CurrMeasures or not CurrMeasuresRestless:
+                    continue
 
-            if not CurrMeasures:
-                continue
+                NotesPerChordBeatPerPart = self.getNotesPerChordBeatPerPart(CurrMeasures, CurrMeasuresNotes)
 
-            AlbertiBeats4 = self.detectAlbertiBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=4)
-            AlbertiBeats = AlbertiBeats4
-            if curr_time_sig.ratioString in ['3/4','6/8','3/8']:
-                AlbertiBeats6 = self.detectAlbertiBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=6)
-                AlbertiBeats = [x or y for (x, y) in zip(AlbertiBeats4, AlbertiBeats6)]
+                AlbertiBeats4 = self.detectAlbertiBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=4)
+                AlbertiBeats = AlbertiBeats4
+                if curr_time_sig.ratioString in ['3/4','6/8','3/8']:
+                    AlbertiBeats6 = self.detectAlbertiBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=6)
+                    AlbertiBeats = [x or y for (x, y) in zip(AlbertiBeats4, AlbertiBeats6)]
 
-            ArpeggioBeats3 = self.detectArpeggioBassInMeasure(CurrMeasuresRestless, arp_len=3)
-            ArpeggioBeats4 = self.detectArpeggioBassInMeasure(CurrMeasuresRestless, arp_len=4)
-            ArpeggioBeats = [x or y for (x, y) in zip(ArpeggioBeats3, ArpeggioBeats4)]
+                ArpeggioBeats3 = self.detectArpeggioBassInMeasure(CurrMeasuresRestless, arp_len=3)
+                ArpeggioBeats4 = self.detectArpeggioBassInMeasure(CurrMeasuresRestless, arp_len=4)
+                ArpeggioBeats = [x or y for (x, y) in zip(ArpeggioBeats3, ArpeggioBeats4)]
 
-            LyricPerBeat = []
+                LyricPerBeat = []
 
-            if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or\
-                    self.KeyDetectionMode==CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
-                #smooth keys here, per measure (TBD - per chord?):
-                self.smoothKeyInterpretations(currMeasureIndex)
-                #sort and return top 2
-                self.Top2Keys = self.getTopNKeyInterpretations(2)
-            else:
-                currKey = self.KeyPerMeasure[currMeasureIndex]#lists start with 0
-
-            for thisChord, thisChordWithBassRests, alberti, arpeggio in zip(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'),CurrMeasures.recurse().getElementsByClass('GeneralNote'), AlbertiBeats, ArpeggioBeats):
                 if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or\
-                        self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
-                    currKeyString = self.Top2Keys[0][0]
-                    currKey = m21.key.Key(currKeyString)
-                    challengerKeyString = self.Top2Keys[1][0]
-                    challengerKey = m21.key.Key(challengerKeyString)
-                    self.updateKeysAndSwapStateMachines(currKeyString, challengerKeyString)
-
-                # main key state machine
-                if thisChord.isRest:
-                    self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio, [])
+                        self.KeyDetectionMode==CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+                    #smooth keys here, per measure (TBD - per chord?):
+                    self.smoothKeyInterpretations(currMeasureIndex)
+                    #sort and return top 2
+                    self.Top2Keys = self.getTopNKeyInterpretations(2)
                 else:
-                    rn = m21.roman.romanNumeralFromChord(thisChord, currKey)
-                    self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, rn.scaleDegree, rn.inversion(), rn.figure, alberti, arpeggio, rn)
+                    currKey = self.KeyPerMeasure[currMeasureIndex]#lists start with 0
 
-                # challenger key state machine
-                if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
-                    if thisChord.isRest:
-                        self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio, [])
+                for thisChord, thisChordWithBassRests, alberti, arpeggio, thisRealNotes in zip(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'),CurrMeasures.recurse().getElementsByClass('GeneralNote'), AlbertiBeats, ArpeggioBeats, NotesPerChordBeatPerPart):
+                    if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or\
+                            self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+                        currKeyString = self.Top2Keys[0][0]
+                        currKey = m21.key.Key(currKeyString)
+                        challengerKeyString = self.Top2Keys[1][0]
+                        challengerKey = m21.key.Key(challengerKeyString)
+                        self.updateKeysAndSwapStateMachines(currKeyString, challengerKeyString)
+
+                    # main key state machine
+                    if thisChordWithBassRests.isRest:
+                        self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio, [], thisRealNotes)
                     else:
-                        rn2 = m21.roman.romanNumeralFromChord(thisChord, challengerKey)
-                        self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, rn2.scaleDegree, rn2.inversion(), rn2.figure, alberti, arpeggio, rn2)
+                        rn = m21.roman.romanNumeralFromChord(thisChordWithBassRests, currKey)
+                        self.HarmonicStateMachine.updateHarmonicState(currKey, thisChord, thisChordWithBassRests, rn.scaleDegree, rn.inversion(), rn.figure, alberti, arpeggio, rn, thisRealNotes)
 
-                #TBD - should we handle this reversion in challenger?
-                if self.HarmonicStateMachine.getRevertLastPACAndReset() and len(LyricPerBeat)>0: #this limits PAC reversion to within measure
-                    LastPACTuple = LyricPerBeat[-1]
-                    UpdatedLyric = "IAC"
-                    LyricPerBeat[-1] = [LastPACTuple[0], UpdatedLyric]
-                    print("Reverting last PAC to IAC")
+                    # challenger key state machine
+                    if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+                        if thisChordWithBassRests.isRest:
+                            self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio, [], thisRealNotes)
+                        else:
+                            rn2 = m21.roman.romanNumeralFromChord(thisChordWithBassRests, challengerKey)
+                            self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, rn2.scaleDegree, rn2.inversion(), rn2.figure, alberti, arpeggio, rn2, thisRealNotes)
 
-                Lyric = self.HarmonicStateMachine.getCadentialOutputString()
-                LyricChallenger = self.HarmonicStateMachineChallenger.getCadentialOutputString()
-                # Cadence Sensitive Key Detection Mode
-                if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
-                    # and self.HarmonicStateMachineChallenger.CurrHarmonicState.Key.tonic != self.HarmonicStateMachine.CurrHarmonicState.Key.tonic: #don't be sensitive to candece in parallel key:
-                    # Cadence check in main key (for key re-enforcement)
+                    #TBD - should we handle this reversion in challenger?
+                    if self.HarmonicStateMachine.getRevertLastPACAndReset() and len(LyricPerBeat)>0: #this limits PAC reversion to within measure
+                        LastPACTuple = LyricPerBeat[-1]
+                        UpdatedLyric = "IAC"
+                        LyricPerBeat[-1] = [LastPACTuple[0], UpdatedLyric]
+                        print("Reverting last PAC to IAC")
 
-                    resort = False
-                    for cad in self.ReenforcementFactors:
-                        if cad in Lyric:
-                            self.reenforceKeyByFactor(currKeyString, self.ReenforcementFactors[cad])
-                        # Challenger Check (for key switching, but ignore HCs in subdominant key (becuase they are more likely PACs in main key))
-                        if cad in LyricChallenger:
-                            reenforce =  not (challengerKey.tonic.pitchClass == self.getSubDominantPitchClass(currKey) and (cad == 'HC')) # and not (challengerKey.tonic.pitchClass == currKey.getDominant().pitchClass and (cad == 'PAC'))
-                            if reenforce:
-                                self.reenforceKeyByFactor(challengerKeyString, self.ReenforcementFactors[cad])
-                                resort = True
-                    if resort:
-                        # re-sort and return Top2Keys
-                        self.Top2Keys = self.getTopNKeyInterpretations(2)
-                        if challengerKeyString == self.Top2Keys[0][0]:
-                            Lyric = LyricChallenger
-                            print('Cadential Key Change!')
+                    Lyric = self.HarmonicStateMachine.getCadentialOutputString()
+                    LyricChallenger = self.HarmonicStateMachineChallenger.getCadentialOutputString()
+                    # Cadence Sensitive Key Detection Mode
+                    if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+                        # and self.HarmonicStateMachineChallenger.CurrHarmonicState.Key.tonic != self.HarmonicStateMachine.CurrHarmonicState.Key.tonic: #don't be sensitive to candece in parallel key:
+                        # Cadence check in main key (for key re-enforcement)
 
-                # debugging
-                # print(self.HarmonicStateMachine.getCadentialOutput().value)
-                # thisChord.lyric = str(rn.figure)
+                        resort = False
+                        for cad in self.ReenforcementFactors:
+                            if cad in Lyric:
+                                self.reenforceKeyByFactor(currKeyString, self.ReenforcementFactors[cad])
+                            # Challenger Check (for key switching, but ignore HCs in subdominant key (becuase they are more likely PACs in main key))
+                            if cad in LyricChallenger:
+                                reenforce =  not (challengerKey.tonic.pitchClass == self.getSubDominantPitchClass(currKey) and (cad == 'HC')) # and not (challengerKey.tonic.pitchClass == currKey.getDominant().pitchClass and (cad == 'PAC'))
+                                if reenforce:
+                                    self.reenforceKeyByFactor(challengerKeyString, self.ReenforcementFactors[cad])
+                                    resort = True
+                        if resort:
+                            # re-sort and return Top2Keys
+                            self.Top2Keys = self.getTopNKeyInterpretations(2)
+                            if challengerKeyString == self.Top2Keys[0][0]:
+                                Lyric = LyricChallenger
+                                print('Cadential Key Change!')
 
-                if Lyric:   # only work on non-empty lyrics
-                    thisChord.lyric = Lyric
-                    LyricPerBeat.append([thisChord.beat,Lyric])
-                    #TBD - do we still need to print this?
-                    print(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds'] + measuresSecondsMap[currMeasureIndex]['durationSeconds']*(thisChord.beat-1)/CurrMeasuresRestless.duration.quarterLength:.1f} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileTransitions)
+                    # debugging
+                    # print(self.HarmonicStateMachine.getCadentialOutput().value)
+                    # thisChord.lyric = str(rn.figure)
 
-            #if self.HarmonicStateMachine.PACPending and len(LyricPerBeat) > 0:  # PAC reversion at end of measure in case PAC state was not exited within the measure
-            #    for i,curr_tup in enumerate(LyricPerBeat):
-            #        if 'PAC' in curr_tup[1]:
-            #            UpdatedLyric = "IAC"
-            #            LyricPerBeat[i] = [curr_tup[0], UpdatedLyric]
-            #            print("Reverting last PAC to IAC")
+                    if Lyric:   # only work on non-empty lyrics
+                        thisChord.lyric = Lyric
+                        LyricPerBeat.append([thisChord.beat,Lyric])
+                        #TBD - do we still need to print this?
+                        print(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds'] + measuresSecondsMap[currMeasureIndex]['durationSeconds']*(thisChord.beat-1)/CurrMeasuresRestless.duration.quarterLength:.1f} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileTransitions)
 
-            #checking cadences on entire measure
-            for LyricTuple in LyricPerBeat:
-                Lyric = LyricTuple[1]
-                if "PAC" in Lyric or "IAC" in Lyric or "HC" in Lyric or "PCC" in Lyric:
-                    if "PAC" in Lyric:
-                        CadString = "PAC"
-                    elif "IAC" in Lyric:
-                        CadString = "IAC"
-                    elif "HC" in Lyric:
-                        CadString = "HC"
-                    elif "PCC" in Lyric:
-                        CadString = "PCC"
-                    CadStringToNumMap = {"PAC": CDCadentialStates.PACArrival.value, "IAC": CDCadentialStates.IACArrival.value, "HC": CDCadentialStates.HCArrival.value, "PCC": CDCadentialStates.PCCArrival.value}
-                    # incomplete and empty counters count measures that should be discarded
-                    measure_to_write = measure_number - self.hasPickupMeasure - empty_measure_counter
-                    print('Measure ', measure_to_write, ' offset ', measuresSecondsMap[currMeasureIndex]['offsetSeconds'], " ", Lyric)
-                    print(f"Measure: {measure_to_write} Offset: {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {Lyric}", file=text_file)
-                    print(f"{measure_to_write} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {CadStringToNumMap[CadString]}", file=text_fileOffsets)
-                elif "Key" in Lyric:
-                    print(Lyric)
+                #if self.HarmonicStateMachine.PACPending and len(LyricPerBeat) > 0:  # PAC reversion at end of measure in case PAC state was not exited within the measure
+                #    for i,curr_tup in enumerate(LyricPerBeat):
+                #        if 'PAC' in curr_tup[1]:
+                #            UpdatedLyric = "IAC"
+                #            LyricPerBeat[i] = [curr_tup[0], UpdatedLyric]
+                #            print("Reverting last PAC to IAC")
 
-            # ONLY NOW update repeat counter!!
-            repeat_counter = repeat_counter + self.RepeatedMeasureByVolta[currMeasureIndex]
+                #checking cadences on entire measure
+                for LyricTuple in LyricPerBeat:
+                    Lyric = LyricTuple[1]
+                    if "PAC" in Lyric or "IAC" in Lyric or "HC" in Lyric or "PCC" in Lyric:
+                        if "PAC" in Lyric:
+                            CadString = "PAC"
+                        elif "IAC" in Lyric:
+                            CadString = "IAC"
+                        elif "HC" in Lyric:
+                            CadString = "HC"
+                        elif "PCC" in Lyric:
+                            CadString = "PCC"
+                        CadStringToNumMap = {"PAC": CDCadentialStates.PACArrival.value, "IAC": CDCadentialStates.IACArrival.value, "HC": CDCadentialStates.HCArrival.value, "PCC": CDCadentialStates.PCCArrival.value}
+                        # incomplete and empty counters count measures that should be discarded
+                        measure_to_write = measure_number - self.hasPickupMeasure - empty_measure_counter
+                        print('Measure ', measure_to_write, ' offset ', measuresSecondsMap[currMeasureIndex]['offsetSeconds'], " ", Lyric)
+                        print(f"Measure: {measure_to_write} Offset: {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {Lyric}", file=text_file)
+                        print(f"{measure_to_write} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {CadStringToNumMap[CadString]}", file=text_fileOffsets)
+                    elif "Key" in Lyric:
+                        print(Lyric)
 
-                # save transitions to file regardless of Lyrics
-                # if prevState != self.HarmonicStateMachine.getCadentialOutput().value:
-                #    print(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileTransitions)
-                # prevState = self.HarmonicStateMachine.getCadentialOutput().value
-                # thisChord.lyric = str("block ") + str(i)
+                # ONLY NOW update repeat counter!!
+                repeat_counter = repeat_counter + self.RepeatedMeasureByVolta[currMeasureIndex]
 
-            # === for debugging measure number problems
-            #LyricPerBeat.append((1,str(currMeasureIndex)))
-            # === for debugging key shifting
-            #currKeyString = self.Top2Keys[0][0]
-            #challengerKeyString = self.Top2Keys[1][0]
-            #LyricPerBeat.append((1, f'{currKeyString} {self.CurrSmoothedInterpretations[currKeyString]}'))
-            #LyricPerBeat.append((1, f'{challengerKeyString} {self.CurrSmoothedInterpretations[challengerKeyString]}'))
+                    # save transitions to file regardless of Lyrics
+                    # if prevState != self.HarmonicStateMachine.getCadentialOutput().value:
+                    #    print(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileTransitions)
+                    # prevState = self.HarmonicStateMachine.getCadentialOutput().value
+                    # thisChord.lyric = str("block ") + str(i)
 
-            # write coefs per measure for offline analysis
-            coefs_per_measure.append(copy.deepcopy(self.CurrSmoothedInterpretations))
+                # === for debugging measure number problems
+                #LyricPerBeat.append((1,str(currMeasureIndex)))
+                # === for debugging key shifting
+                #currKeyString = self.Top2Keys[0][0]
+                #challengerKeyString = self.Top2Keys[1][0]
+                #LyricPerBeat.append((1, f'{currKeyString} {self.CurrSmoothedInterpretations[currKeyString]}'))
+                #LyricPerBeat.append((1, f'{challengerKeyString} {self.CurrSmoothedInterpretations[challengerKeyString]}'))
 
-            Parts = CurrMeasuresNotes.recurse().getElementsByClass(m21.stream.Part)
-            Lyrics_to_filter = ['IAC', 'CA'] # for filtering the display
-            for thisLyric in LyricPerBeat:
-                if thisLyric[1] not in Lyrics_to_filter:
-                    found = 0
-                    for index in range(0, self.NumParts):
-                        for thisNote in Parts[-1-index].flat.notesAndRests:  # adding lyric from last part up, assuming its the bass line
-                            if thisNote.beat == thisLyric[0]:
-                                thisNote.lyric = thisLyric[1]
-                                found = 1
+                # write coefs per measure for offline analysis
+                coefs_per_measure.append(copy.deepcopy(self.CurrSmoothedInterpretations))
+
+                Parts = CurrMeasuresNotes.recurse().getElementsByClass(m21.stream.Part)
+                Lyrics_to_filter = ['CA'] # for filtering the display
+                for thisLyric in LyricPerBeat:
+                    if thisLyric[1] not in Lyrics_to_filter:
+                        found = 0
+                        for index in range(0, self.NumParts):
+                            for thisNote in Parts[-1-index].flat.notesAndRests:  # adding lyric from last part up, assuming its the bass line
+                                if thisNote.beat == thisLyric[0]:
+                                    thisNote.lyric = thisLyric[1]
+                                    found = 1
+                                    break
+                            if found == 1:
                                 break
-                        if found == 1:
-                            break
 
-            #write corrected key at end of measure
-            if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
-                correctedKeyString = self.Top2Keys[0][0]
-                correctedKey = m21.key.Key(correctedKeyString)
-                self.CorrectedKeyPerMeasure.append(correctedKey)
+                #write corrected key at end of measure
+                if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
+                    correctedKeyString = self.Top2Keys[0][0]
+                    correctedKey = m21.key.Key(correctedKeyString)
+                    self.CorrectedKeyPerMeasure.append(correctedKey)
+        except:
+            print(f"Exception occurred on measure {measure_number}")
+            raise
 
         text_file.close()
         text_fileOffsets.close()

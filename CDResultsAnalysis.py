@@ -204,6 +204,7 @@ for labelled_fp in sorted(full_list):
 
         FileNameForText = labelled_file.replace(".txt", " ")
         FileNameForText = FileNameForText.replace("_", " ")
+        FileNameForText = FileNameForText.replace('.tsv', '')
 
         for item in list(set(CurrTestCadences).intersection(CurrStateMachineCadences)):
             TotalCommonPacs.append(item)
@@ -226,14 +227,14 @@ for labelled_fp in sorted(full_list):
         for item in CurrFalseNegatives:
             TotalFN.append(CurrFalseNegatives)
 
-        CombinedTable.append([FileNameForText, ",".join(CurrTestCadences), ",".join(CurrStateMachineCadences)])
-        CombinedTableExtended.append([FileNameForText, ",".join(CurrTestCadences), ",".join(CurrStateMachineCadences),
-                                      ",".join(CurrFalsePositives), ",".join(CurrFalseNegatives)])
-        LabelsTable.append([FileNameForText, ",".join(CurrTestCadences)])
-        PredictionsTable.append([FileNameForText, ",".join(CurrStateMachineCadences), PAC_density])
+        CombinedTable.append([FileNameForText, ", ".join(CurrTestCadences), ", ".join(CurrStateMachineCadences)])
+        CombinedTableExtended.append([FileNameForText, ", ".join(CurrTestCadences), ", ".join(CurrStateMachineCadences),
+                                      ", ".join(CurrFalsePositives), ", ".join(CurrFalseNegatives)])
+        LabelsTable.append([FileNameForText, ", ".join(CurrTestCadences)])
+        PredictionsTable.append([FileNameForText, ", ".join(CurrStateMachineCadences), PAC_density])
 
 # writing to console
-table_to_console = CombinedTableExtended if TestData.PACMeasureIndex else PredictionsTable
+table_to_console = copy.deepcopy(CombinedTableExtended) if TestData.PACMeasureIndex else copy.deepcopy(PredictionsTable)
 print('========Detection Table:==========')
 for row in table_to_console:
     for col, item in enumerate(row):
@@ -260,7 +261,7 @@ FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData
 write_table_to_latex(LabelsTable, FullPathResults)
 
 FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_PredictionsLatexTable_{current_time}.txt")
-write_table_to_latex(PredictionsTable, FullPathResults)
+write_table_to_latex([line[:2] for line in PredictionsTable], FullPathResults)
 
 # write summary table in latex format
 if TestData.PACMeasureIndex:

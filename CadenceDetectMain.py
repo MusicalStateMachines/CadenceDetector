@@ -9,11 +9,11 @@ DCMBeethovenPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
 # haydn singe file
-XMLFileEnding = "op054_no02_mv01.xml"
+XMLFileEnding = "op050_no06_mv02.xml"
 # mozart single file
-# XMLFileEnding = "533-3.xml"
+#XMLFileEnding = "284-3.xml"
 # beethoven single file
-# XMLFileEnding = "op127_no12_mov1.mxl"
+#XMLFileEnding = "op18_no1_mov2.mxl"
 # all files
 XMLFileEnding = ".xml"
 # multi-core processing
@@ -51,51 +51,56 @@ import time
 import multiprocessing as mp
 
 def findCadencesInFile(file, only_get_num_measures = False):
-    if file.endswith(XMLFileEnding):
-        # define path
-        FullPath = os.path.join(InputFilePath, file)
-        print(f"Analyzing {FullPath}")
-        # init detector class
-        CD = CadenceDetector()
-        CD.KeyDetectionMode = KeyDetectionMode
-        CD.KeyDetectionForgetFactor = KeyDetectionForgetFactor
-        CD.ReenforcementFactors = ReenforcementFactors
-        if only_get_num_measures:
-            CD.loadFileAndGetMeasures(FullPath)
-        else:
-            # load file to detector
-            CD.loadFile(FullPath)
-            # set files
-            CD.setFileName(file)
-            CD.setWritePath(OutputFilePath)
-            # CD.loadMusic21Corpus(music21file)
-            overlap = 1 / KeyDetectionBlockSize  # ratio from block size, this creates an step size of 1 measure
-            # detect key per measure
-            if ReadKeyFromSears:
-                CD.getKeyPerMeasureFromSearsFile(FullPath)
-                CD.writeKeyPerMeasureToFile(KeyDetectionMode)
-            elif RunKeyDetection:
-                CD.detectKeyPerMeasureWrapper(KeyDetectionBlockSize, overlap)
-                # write To file
-                CD.writeKeyPerMeasureToFile(KeyDetectionMode)
-            if RunCadenceDetection:
-                # read from file
-                CD.readKeyPerMeasureFromFile(KeyDetectionMode)
-                # detect cadences per key
-                CD.detectCadences()
-                try:
-                    CD.writeAnalyzedFile()
-                except Exception as e:
-                    print('error: could not write file:', e)
-        return {'file': file, 'num_measures': CD.NumMeasures}
-        #display
-        #CD.displayFull()
+    try:
+        if file.endswith(XMLFileEnding):
+            # define path
+            FullPath = os.path.join(InputFilePath, file)
+            print(f"Analyzing {FullPath}")
+            # init detector class
+            CD = CadenceDetector()
+            CD.KeyDetectionMode = KeyDetectionMode
+            CD.KeyDetectionForgetFactor = KeyDetectionForgetFactor
+            CD.ReenforcementFactors = ReenforcementFactors
+            if only_get_num_measures:
+                CD.loadFileAndGetMeasures(FullPath)
+            else:
+                # load file to detector
+                CD.loadFile(FullPath)
+                # set files
+                CD.setFileName(file)
+                CD.setWritePath(OutputFilePath)
+                # CD.loadMusic21Corpus(music21file)
+                overlap = 1 / KeyDetectionBlockSize  # ratio from block size, this creates an step size of 1 measure
+                # detect key per measure
+                if ReadKeyFromSears:
+                    CD.getKeyPerMeasureFromSearsFile(FullPath)
+                    CD.writeKeyPerMeasureToFile(KeyDetectionMode)
+                elif RunKeyDetection:
+                    CD.detectKeyPerMeasureWrapper(KeyDetectionBlockSize, overlap)
+                    # write To file
+                    CD.writeKeyPerMeasureToFile(KeyDetectionMode)
+                if RunCadenceDetection:
+                    # read from file
+                    CD.readKeyPerMeasureFromFile(KeyDetectionMode)
+                    # detect cadences per key
+                    CD.detectCadences()
+                    try:
+                        CD.writeAnalyzedFile()
+                    except Exception as e:
+                        print('error: could not write file:', e)
+            return {'file': file, 'num_measures': CD.NumMeasures}
+            #display
+            #CD.displayFull()
+    except Exception as e:
+        print(f"Exception while processing file: {file}")
+        raise
 
 
 if __name__ == '__main__':
     fileList = sorted(os.listdir(InputFilePath))
     full_list = [file for file in fileList if file.endswith(XMLFileEnding)]
     start = time.time()
+    num_measures_per_mov = []
     if DoParallelProcessing:
         print("Parallel Processing On")
         print("Number of processors: ", mp.cpu_count())

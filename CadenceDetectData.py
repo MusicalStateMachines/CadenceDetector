@@ -46,7 +46,7 @@ class CDKeyDetectionModes(Enum):
 
 
 class CDHarmonicState:
-    def __init__(self, Key, Chord, ChordWithRests, ChordDegree, ChordInversion, ChordFigure, Alberti, Arpeggio, TimeSig, RomanNumeral):
+    def __init__(self, Key, Chord, ChordWithRests, ChordDegree, ChordInversion, ChordFigure, Alberti, Arpeggio, TimeSig, RomanNumeral, RealNotes):
         self.Key = Key
         self.Chord = Chord
         self.RomanNumeral = RomanNumeral
@@ -57,6 +57,7 @@ class CDHarmonicState:
         self.Alberti = Alberti
         self.Arpeggio = Arpeggio
         self.TimeSig = TimeSig
+        self.RealNotes = RealNotes
 
 
 
