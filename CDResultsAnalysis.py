@@ -124,7 +124,7 @@ ABCData.Label = "Beethoven String Quartets"
 ABCData.Composer = "Beethoven"
 
 # set which database to compare to
-TestData = DCMData
+TestData = SearsData
 optimize_false_positives = False
 
 # set state machine data
@@ -275,19 +275,19 @@ if TestData.PACMeasureIndex:
     min_false = 100
     min_both = 100
     for row in CombinedTableExtended:
-        missed_cadences = len(row[4])
+        missed_cadences = 0 if row[4]=='' else len(row[4].split(','))
         if missed_cadences >= max_misses:
             max_misses = missed_cadences
             max_row_misses = row
         if missed_cadences <= min_misses:
             min_misses = missed_cadences
             min_row_misses = row
-        false_cadences = len(row[3])
+        false_cadences = 0 if row[3]=='' else len(row[3].split(','))
         if false_cadences >= max_false:
             max_false = false_cadences
             max_row_false = row
         if false_cadences <= min_false:
-            min_false = missed_cadences
+            min_false = false_cadences
             min_row_false = row
         both = missed_cadences + false_cadences
         if both >= max_both:
@@ -301,14 +301,14 @@ if TestData.PACMeasureIndex:
     print(min_row_misses[0])
     print('missed cadences:', min_row_misses[4] if len(min_row_misses[4])>0 else None)
     print(min_row_false[0])
-    print('false cadences:', min_row_false[3] if len(min_row_misses[3])>0 else None)
+    print('false cadences:', min_row_false[3] if len(min_row_false[3])>0 else None)
     print(min_row_both[0])
     print('missed:', min_row_both[4] if len(min_row_both[4])>0 else None, 'false:', min_row_both[3] if len(min_row_both[3]) > 0 else None)
     print('===worst cases:===')
     print(max_row_misses[0])
     print('missed cadences:', max_row_misses[4] if len(max_row_misses[4])>0 else None)
     print(max_row_false[0])
-    print('false cadences:', max_row_false[3] if len(max_row_misses[4])>0 else None)
+    print('false cadences:', max_row_false[3] if len(max_row_false[3])>0 else None)
     print(max_row_both[0])
     print('missed:', max_row_both[4] if len(max_row_both[4]) > 0 else None, 'false:', max_row_both[3] if len(max_row_both[3]) > 0 else None)
     path = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'

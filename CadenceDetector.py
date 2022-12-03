@@ -335,10 +335,15 @@ class CadenceDetector:
         prev_note = []
         prev_measure_dur = []
         consecutive_empty_measure_durations = []
+        measures_to_tie = []
         parts = self.NoteStreamRestless.recurse().getElementsByClass(m21.stream.Part)
         for curr_measure in parts[-1].recurse().getElementsByClass(m21.stream.Measure):
             notes_in_measure = 0
             measure_modifcations_list = []
+            if curr_measure.measureNumber == 121:
+                bla  = 0
+            # get curr meaure duration before alterations
+            curr_measure_duration = copy.deepcopy(curr_measure.duration.quarterLength)
             #find rest and create modifications
             sortedSecondsMaps = sorted(curr_measure.recurse().secondsMap, key=lambda d: d['offsetSeconds'])
             for curr_item in sortedSecondsMaps:
@@ -368,12 +373,15 @@ class CadenceDetector:
                             if extended_quarterLength > prev_note['element'].quarterLength and (notes_in_measure > 0 or len(consecutive_empty_measure_durations) <= max_consec_empty_meas):
                                 prev_note['element'].duration = m21.duration.Duration(extended_quarterLength)
                                 prev_note['element'].quarterLength = extended_quarterLength
+                            # now check if prev_note exceeded its measure length
+                            if (prev_note['element'].offset + prev_note['element'].quarterLength > curr_measure_duration):
+                                measures_to_tie.append({'from': prev_note['element'].measureNumber, 'to': curr_measure.measureNumber})
                             prev_note = curr_item
                     notes_in_measure += 1
                     consecutive_empty_measure_durations = []
             #extend last note to complete measure
             if prev_note and notes_in_measure > 0:
-                remainder = curr_measure.duration.quarterLength - prev_note['element'].offset
+                remainder = curr_measure_duration - prev_note['element'].offset
                 if remainder > prev_note['element'].quarterLength:
                     prev_note['element'].duration = m21.duration.Duration(remainder)
                     prev_note['element'].quarterLength = remainder
@@ -386,18 +394,23 @@ class CadenceDetector:
             prev_measure_dur = curr_measure.duration.quarterLength
             # make erase modifications to measure
             curr_measure.remove(measure_modifcations_list, recurse=True)
-        # making ties for notes extending beyond measure
-        #self.NoteStreamRestless.makeMeasures(inPlace=True)
-        try:
-            self.NoteStreamRestless.parts[-1].recurse().makeTies(inPlace=True)
-        except:
-            print(f'makeTies failed')
-        #try:
-        #    self.NoteStreamRestless.recurse().makeTies(inPlace=True)
-        #except:
-        #    print(f'makeTies failed on full stream, trying only on bass part')
-        #    self.NoteStreamRestless.parts[-1].recurse().makeTies(inPlace=True)
-
+        # making ties for notes extending beyond measure locally
+        makeTies_local_failure = False
+        for curr_measures_to_tie in measures_to_tie:
+            try:
+                self.NoteStreamRestless.parts[-1].measures(curr_measures_to_tie['from'], curr_measures_to_tie['to']).recurse().makeTies(inPlace=True)
+            except:
+                makeTies_local_failure = True
+                print(f'makeTies failed on measures {curr_measures_to_tie}')
+        # making ties on entire stream if it failed locally
+        if makeTies_local_failure:
+            try:
+                self.NoteStreamRestless.parts[-1].recurse().makeTies(inPlace=True)
+                print(f'makeTies overall succeeded')
+            except:
+                print(f'makeTies failed')
+        else:
+            print(f'makeTies locally succeeded')
 
     def noteFromRestWithPitch(self,rest,pitch):
         noteFromRest = m21.note.Note(pitch)
@@ -706,7 +719,8 @@ class CadenceDetector:
                 if None not in pattern_notes:
                     isAlberti = self.isAlbertiPattern(pattern_notes,pattern_len)
                     if isAlberti:
-                        alberti_patterns.append({'start': bass_general_notes[i+1].beat, 'stop': bass_general_notes[i+pattern_len-1].beat})
+                        epsilon = 0.1 # this epsilon is required to mark the last alberti beat including its length, but not the next beat
+                        alberti_patterns.append({'start': bass_general_notes[i+1].beat, 'stop': bass_general_notes[i+pattern_len-1].beat + bass_general_notes[i+pattern_len-1].duration.quarterLength - epsilon})
 
         albertiBeats = [0] * len(measure_general_notes)
         for i,gen_note in enumerate(measure_general_notes):
@@ -782,7 +796,7 @@ class CadenceDetector:
         try:
             for currMeasureIndex in range(0,self.NumMeasures):
                 # debug per measure
-                if currMeasureIndex == 4:
+                if currMeasureIndex == 6:
                     bla = 0
                 # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
                 # for example, data that originates from midi cannot contain this info
