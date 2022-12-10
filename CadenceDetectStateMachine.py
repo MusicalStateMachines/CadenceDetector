@@ -326,6 +326,20 @@ class CDStateMachine(object):
                         retVal = sign in note.groups
         return retVal
 
+    def isBassPartRest(self):
+        retVal = True
+        # serach for explicit rest in bass part
+        bass_part = self.CurrHarmonicState.RealNotes[-1]
+        if len(bass_part) == 0:
+            retVal = False
+        else:
+            for noteOrRest in bass_part:
+                if not noteOrRest.isRest:
+                    retVal = False
+                    break
+        return retVal
+
+
     def updateCadentialState(self):
 
         curr_state = self.CurrCadentialState #set to temp variable for clean code
@@ -393,7 +407,7 @@ class CDStateMachine(object):
         # ========================================================
         elif curr_state==CDCadentialStates.CadInevitable or curr_state==CDCadentialStates.IACArrivalExpected:
             #on dominant and then a complete rest --> HC
-            if self.CurrHarmonicState.ChordWithBassRests.isRest:
+            if self.CurrHarmonicState.ChordWithBassRests.isRest or self.isBassPartRest():
                 if curr_state==CDCadentialStates.CadInevitable and self.tryGetBeatStrength() < 1.0 and self.verifyNotI64(HarmonicState=self.PrevHarmonicState):
                     curr_state = CDCadentialStates.HCArrival
                     self.WeightOfLastCadence = self.tryGetBeatStrength()
@@ -485,7 +499,7 @@ class CDStateMachine(object):
                         curr_state = CDCadentialStates.CadAvoided
 
 
-        elif curr_state == CDCadentialStates.PACAppoggExpected:
+        elif curr_state == CDCadentialStates.PACAppoggExpected or curr_state == CDCadentialStates.BassAppoggExpected:
 
             if self.CurrHarmonicState.ChordWithBassRests.isRest or self.tryGetBeatStrength() == 1: # rest or new measure, exit appoggiatura:
                 curr_state = CDCadentialStates.CadExpected
@@ -495,7 +509,9 @@ class CDStateMachine(object):
             #    curr_state = curr_state
             else:
             # ==appoggiatura, check bass still on key and if soprano is root then PAC otherwise IAC
-                if self.isTonicBass():
+                if curr_state ==  CDCadentialStates.BassAppoggExpected and (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
+                    curr_state = curr_state
+                elif self.isTonicBass():
                     if self.isSopraneOnDegree(1) and self.verifySopranoVoiceLeading():
                         curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival)
                     elif self.isSopraneOnDegree(3) or self.isSopraneOnDegree(5):
@@ -648,7 +664,7 @@ class CDStateMachine(object):
 
     def checkBassAppoggiatura(self, curr_state):
         if curr_state == CDCadentialStates.CadInevitable and self.isSopraneOnDegree(1):
-            curr_state = CDCadentialStates.PACAppoggExpected
+            curr_state = CDCadentialStates.BassAppoggExpected
         elif curr_state == CDCadentialStates.IACArrivalExpected and (self.isSopraneOnDegree([1, 2 , 3, 7])):
             curr_state = CDCadentialStates.IACAppoggExpected
         elif curr_state == CDCadentialStates.IACArrivalExpected and (self.isSopranoAtSemitoneFromDegree(1, [1, 3])):

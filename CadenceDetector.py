@@ -767,7 +767,7 @@ class CadenceDetector:
 
     def getNotesPerChordBeatPerPart(self, ChordsMeasure, NotesMeasure):
         Parts = NotesMeasure.recurse().getElementsByClass(m21.stream.Part)
-        notesPerChordBeatPerPart = [[[real_note for real_note in part.flat.notes if (chord.beat == real_note.beat and (real_note.isNote or real_note.isChord))] for part in Parts] for chord in ChordsMeasure.recurse().getElementsByClass('GeneralNote')]
+        notesPerChordBeatPerPart = [[[real_note for real_note in part.flat.notesAndRests if chord.beat == real_note.beat] for part in Parts] for chord in ChordsMeasure.recurse().getElementsByClass('GeneralNote')]
         return notesPerChordBeatPerPart
 
 
@@ -796,7 +796,7 @@ class CadenceDetector:
         try:
             for currMeasureIndex in range(0,self.NumMeasures):
                 # debug per measure
-                if currMeasureIndex == 6:
+                if currMeasureIndex == 3:
                     bla = 0
                 # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
                 # for example, data that originates from midi cannot contain this info

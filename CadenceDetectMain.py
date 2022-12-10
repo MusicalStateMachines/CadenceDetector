@@ -11,9 +11,9 @@ MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 # all files
 XMLFileEnding = ".xml"
 # haydn singe file
-# XMLFileEnding = "op050_no06_mv02.xml"
+# XMLFileEnding = "op017_no05_mv01.xml"
 # mozart single file
-# XMLFileEnding = "330-2.xml"
+# XMLFileEnding = "284-3.xml"
 # beethoven single file
 #XMLFileEnding = "op18_no1_mov2.mxl"
 # multi-core processing

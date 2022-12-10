@@ -123,7 +123,9 @@ ABCData.TotalNumMeasures = 0 # computed from files
 ABCData.Label = "Beethoven String Quartets"
 ABCData.Composer = "Beethoven"
 
+# ==================================
 # set which database to compare to
+# ==================================
 TestData = SearsData
 optimize_false_positives = False
 
