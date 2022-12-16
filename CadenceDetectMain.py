@@ -9,18 +9,18 @@ DCMBeethovenPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
 # all files
-XMLFileEnding = ".xml"
+XMLFileEnding = ".mxl"
 # haydn singe file
 # XMLFileEnding = "op017_no05_mv01.xml"
 # mozart single file
 # XMLFileEnding = "284-3.xml"
 # beethoven single file
-#XMLFileEnding = "op18_no1_mov2.mxl"
+# XMLFileEnding = "op18_no1_mov2.mxl"
 # multi-core processing
-DoParallelProcessing = XMLFileEnding == '.xml'
+DoParallelProcessing = XMLFileEnding in ['.xml', '.mxl']
 
 # select analysis path
-InputFilePath = SearsHaydnPath
+InputFilePath = DCMBeethovenPath
 OutputFilePath = MyPath
 
 #===for testing a single file not in database

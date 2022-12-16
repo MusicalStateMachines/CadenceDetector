@@ -208,7 +208,11 @@ for labelled_fp in sorted(full_list):
         FileNameForText = FileNameForText.replace("_", " ")
         FileNameForText = FileNameForText.replace('.tsv', '')
 
-        for item in list(set(CurrTestCadences).intersection(CurrStateMachineCadences)):
+        # *set(l) removes duplicates from lists
+        CurrTestCadences = [*set(CurrTestCadences)]
+        CurrStateMachineCadences = [*set(CurrStateMachineCadences)]
+
+        for item in list(set(CurrTestCadences).intersection(set(CurrStateMachineCadences))):
             TotalCommonPacs.append(item)
 
         for item in CurrTestCadences:
@@ -217,17 +221,23 @@ for labelled_fp in sorted(full_list):
         for item in CurrStateMachineCadences:
             TotalStateMachine.append(item)
 
-        for item in list(set(CurrStateMachineCadences).symmetric_difference(CurrTestCadences)):
+        for item in list(set(CurrStateMachineCadences).symmetric_difference(set(CurrTestCadences))):
             if item in CurrStateMachineCadences:
                 CurrFalsePositives.append(item)
             else:
                 CurrFalseNegatives.append(item)
 
         for item in CurrFalsePositives:
-            TotalFP.append(CurrFalsePositives)
+            TotalFP.append(item)
 
         for item in CurrFalseNegatives:
-            TotalFN.append(CurrFalseNegatives)
+            TotalFN.append(item)
+
+        if len(TotalCommonPacs) + len(TotalFN) != len(TotalTest):
+            raise Exception('Something is wrong with this computation, len(TotalCommonPacs) + len(TotalFN) != len(TotalTest)')
+
+        if len(TotalCommonPacs) + len(TotalFP) != len(TotalStateMachine):
+            raise Exception('Something is wrong with this computation, len(TotalCommonPacs) + len(TotalFP) != len(TotalStateMachine)')
 
         CombinedTable.append([FileNameForText, ", ".join(CurrTestCadences), ", ".join(CurrStateMachineCadences)])
         CombinedTableExtended.append([FileNameForText, ", ".join(CurrTestCadences), ", ".join(CurrStateMachineCadences),
