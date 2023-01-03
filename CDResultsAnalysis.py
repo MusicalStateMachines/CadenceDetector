@@ -16,9 +16,10 @@ class LabeledData:
         self.Label = []
         self.Composer = []
 
-def write_table_to_latex(table, file_full_path):
+def write_table_to_latex(table, file_full_path, comment=None):
     text_file_results = open(file_full_path, "w")
-    print(" \\\\\n".join([" & ".join(map(str, line)) for line in table]), file=text_file_results)
+    print(f"% {comment}\n", file=text_file_results)
+    print(" \\\\\n".join([" & ".join(map(str, line)).replace('[', '').replace(']', '') for line in table])+" \\\\", file=text_file_results)
     text_file_results.close()
 
 def compute_classification_scores():
@@ -126,7 +127,7 @@ ABCData.Composer = "Beethoven"
 # ==================================
 # set which database to compare to
 # ==================================
-TestData = SearsData
+TestData = DCMData
 optimize_false_positives = False
 
 # set state machine data
@@ -183,7 +184,7 @@ for labelled_fp in sorted(full_list):
                         if CadenceString in line:
                             elements = line.strip().split("\t")
                             print(elements, len(elements))
-                            CurrTestCadences.append(str(elements[TestData.PACMeasureIndex]))
+                            CurrTestCadences.append(int(elements[TestData.PACMeasureIndex]))
                             # print(line, file=text_file_reduced)
 
         # find equivalent in MyPath
@@ -199,7 +200,7 @@ for labelled_fp in sorted(full_list):
                     CurrNumMeasures = int(elements[NumMeasuresIndex])
                 elif CadenceString in line:
                     print(elements)
-                    CurrStateMachineCadences.append(str(elements[StateMachineData.PACMeasureIndex]))
+                    CurrStateMachineCadences.append(int(elements[StateMachineData.PACMeasureIndex]))
             TestData.TotalNumMeasures = TestData.TotalNumMeasures + CurrNumMeasures
             PAC_density = len(CurrStateMachineCadences)/CurrNumMeasures
             print("PAC density: ", PAC_density)
@@ -209,23 +210,28 @@ for labelled_fp in sorted(full_list):
         FileNameForText = FileNameForText.replace('.tsv', '')
 
         # *set(l) removes duplicates from lists
-        CurrTestCadences = [*set(CurrTestCadences)]
-        CurrStateMachineCadences = [*set(CurrStateMachineCadences)]
+        CurrTestCadences = sorted([*set(CurrTestCadences)])
+        CurrStateMachineCadences = sorted([*set(CurrStateMachineCadences)])
 
         for item in list(set(CurrTestCadences).intersection(set(CurrStateMachineCadences))):
             TotalCommonPacs.append(item)
+        TotalCommonPacs = sorted(TotalCommonPacs)
 
         for item in CurrTestCadences:
             TotalTest.append(item)
+        TotalTest = sorted(TotalTest)
 
         for item in CurrStateMachineCadences:
             TotalStateMachine.append(item)
+        TotalStateMachine = sorted(TotalStateMachine)
 
         for item in list(set(CurrStateMachineCadences).symmetric_difference(set(CurrTestCadences))):
             if item in CurrStateMachineCadences:
                 CurrFalsePositives.append(item)
             else:
                 CurrFalseNegatives.append(item)
+        CurrFalsePositives = sorted(CurrFalsePositives)
+        CurrFalseNegatives = sorted(CurrFalseNegatives)
 
         for item in CurrFalsePositives:
             TotalFP.append(item)
@@ -239,47 +245,42 @@ for labelled_fp in sorted(full_list):
         if len(TotalCommonPacs) + len(TotalFP) != len(TotalStateMachine):
             raise Exception('Something is wrong with this computation, len(TotalCommonPacs) + len(TotalFP) != len(TotalStateMachine)')
 
-        CombinedTable.append([FileNameForText, ", ".join(CurrTestCadences), ", ".join(CurrStateMachineCadences)])
-        CombinedTableExtended.append([FileNameForText, ", ".join(CurrTestCadences), ", ".join(CurrStateMachineCadences),
-                                      ", ".join(CurrFalsePositives), ", ".join(CurrFalseNegatives)])
-        LabelsTable.append([FileNameForText, ", ".join(CurrTestCadences)])
-        PredictionsTable.append([FileNameForText, ", ".join(CurrStateMachineCadences), PAC_density])
+        CombinedTable.append([FileNameForText, CurrTestCadences, CurrStateMachineCadences])
+        CombinedTableExtended.append([FileNameForText, CurrTestCadences, CurrStateMachineCadences, CurrFalsePositives, CurrFalseNegatives])
+        LabelsTable.append([FileNameForText, CurrTestCadences])
+        PredictionsTable.append([FileNameForText, CurrStateMachineCadences, PAC_density])
 
 # writing to console
 table_to_console = copy.deepcopy(CombinedTableExtended) if TestData.PACMeasureIndex else copy.deepcopy(PredictionsTable)
 print('========Detection Table:==========')
 for row in table_to_console:
-    for col, item in enumerate(row):
-        if col > 0 and col < len(row)-1:
-            split_item = item.split(',')
-            if split_item != ['']:
-                item = [int(i) for i in split_item]
-                row[col] = sorted(item)
     print(row)
 
 mv_str, diachronically_sorted_predictions = diachronic_sort(PredictionsTable)
 plot_diachronic_analysis(mv_str, diachronically_sorted_predictions)
 
-# wrinting to latex
+# writing to latex
 now = datetime.now()
 current_time = now.strftime("%Y_%m_%d_%H_%M_%S")
+write_dir = os.path.join(StateMachineData.DataPath, os.pardir, 'Results', TestData.Label)
+os.makedirs(write_dir,exist_ok=True)
 
 # write full table in latex format
-FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_FullClassificationsLatexTable_{current_time}.txt")
-write_table_to_latex(CombinedTable, FullPathResults)
+FullPathResults = os.path.join(write_dir, f"{TestData.Label}_FullClassificationsLatexTable.tex")
+write_table_to_latex(CombinedTable, FullPathResults, comment=current_time)
 
 # write partial tables latex format
-FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_LabelsLatexTable_{current_time}.txt")
-write_table_to_latex(LabelsTable, FullPathResults)
+FullPathResults = os.path.join(write_dir, f"{TestData.Label}_LabelsLatexTable.tex")
+write_table_to_latex(LabelsTable, FullPathResults, comment=current_time)
 
-FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_PredictionsLatexTable_{current_time}.txt")
-write_table_to_latex([line[:2] for line in PredictionsTable], FullPathResults)
+FullPathResults = os.path.join(write_dir, f"{TestData.Label}_PredictionsLatexTable.tex")
+write_table_to_latex([line[:2] for line in PredictionsTable], FullPathResults, comment=current_time)
 
 # write summary table in latex format
 if TestData.PACMeasureIndex:
-    FullPathResults = os.path.join(StateMachineData.DataPath, f"../Results/{TestData.Label}_ScoresLatexTable_{current_time}.txt")
+    FullPathResults = os.path.join(write_dir, f"{TestData.Label}_ScoresLatexTable.tex")
     ClassificationResultsTable = compute_classification_scores()
-    write_table_to_latex(ClassificationResultsTable, FullPathResults)
+    write_table_to_latex(ClassificationResultsTable, FullPathResults, comment=current_time)
     max_misses = 0
     max_false = 0
     max_both = 0
@@ -287,14 +288,14 @@ if TestData.PACMeasureIndex:
     min_false = 100
     min_both = 100
     for row in CombinedTableExtended:
-        missed_cadences = 0 if row[4]=='' else len(row[4].split(','))
+        missed_cadences = len(row[4])
         if missed_cadences >= max_misses:
             max_misses = missed_cadences
             max_row_misses = row
         if missed_cadences <= min_misses:
             min_misses = missed_cadences
             min_row_misses = row
-        false_cadences = 0 if row[3]=='' else len(row[3].split(','))
+        false_cadences = len(row[3])
         if false_cadences >= max_false:
             max_false = false_cadences
             max_row_false = row
@@ -311,22 +312,24 @@ if TestData.PACMeasureIndex:
 
     print('===best cases:===')
     print(min_row_misses[0])
-    print('missed cadences:', min_row_misses[4] if len(min_row_misses[4])>0 else None)
+    print('missed cadences:', min_row_misses[4])
     print(min_row_false[0])
-    print('false cadences:', min_row_false[3] if len(min_row_false[3])>0 else None)
+    print('false cadences:', min_row_false[3])
     print(min_row_both[0])
-    print('missed:', min_row_both[4] if len(min_row_both[4])>0 else None, 'false:', min_row_both[3] if len(min_row_both[3]) > 0 else None)
+    print('missed:', min_row_both[4], 'false:', min_row_both[3])
     print('===worst cases:===')
     print(max_row_misses[0])
-    print('missed cadences:', max_row_misses[4] if len(max_row_misses[4])>0 else None)
+    print('missed cadences:', max_row_misses[4])
     print(max_row_false[0])
-    print('false cadences:', max_row_false[3] if len(max_row_false[3])>0 else None)
+    print('false cadences:', max_row_false[3])
     print(max_row_both[0])
-    print('missed:', max_row_both[4] if len(max_row_both[4]) > 0 else None, 'false:', max_row_both[3] if len(max_row_both[3]) > 0 else None)
+    print('missed:', max_row_both[4], 'false:', max_row_both[3])
     path = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 
     file_to_open = max_row_false[0] if optimize_false_positives else max_row_misses[0]
-    full_path = os.path.join(path, file_to_open.replace('.tsv','_').replace(' ','_')) + 'xml_Analyzed.xml'
+    full_path = os.path.join(path, file_to_open.replace(' ', '_'))
+    full_path = full_path + '_' if not full_path[-1] == '_' else full_path
+    full_path = full_path + 'xml_Analyzed.xml'
     subprocess.call(('open', full_path))
 
 

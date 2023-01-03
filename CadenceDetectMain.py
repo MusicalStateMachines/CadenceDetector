@@ -9,18 +9,18 @@ DCMBeethovenPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 #SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
 # all files
-XMLFileEnding = ".mxl"
+XMLFileEnding = ".xml"
 # haydn singe file
-# XMLFileEnding = "op017_no05_mv01.xml"
+#XMLFileEnding = "op064_no04_mv01.xml"
 # mozart single file
-# XMLFileEnding = "284-3.xml"
+# XMLFileEnding = "K457-3.xml"
 # beethoven single file
-# XMLFileEnding = "op18_no1_mov2.mxl"
+# XMLFileEnding = "op130_no13_mov6.mxl"
 # multi-core processing
 DoParallelProcessing = XMLFileEnding in ['.xml', '.mxl']
 
 # select analysis path
-InputFilePath = DCMBeethovenPath
+InputFilePath = DCMLabMozartPath
 OutputFilePath = MyPath
 
 #===for testing a single file not in database
@@ -41,6 +41,7 @@ OnlyGetNumMeasures = False
 KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
 KeyDetectionBlockSizes = {SearsHaydnPath: 4, DCMLabMozartPath: 4, DCMBeethovenPath: 4} # in measures
 KeyDetectionBlockSize = KeyDetectionBlockSizes[InputFilePath]
+KeyDetectionLookAhead = 0.5 # percentage from block size
 KeyDetectionForgetFactor = 0.8
 ReenforcementFactorsDict = {SearsHaydnPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2},
                             DCMLabMozartPath: {'PAC': 3, 'IAC': 1, 'HC': 3/2},
@@ -62,6 +63,7 @@ def findCadencesInFile(file, only_get_num_measures = False):
             CD.KeyDetectionMode = KeyDetectionMode
             CD.KeyDetectionForgetFactor = KeyDetectionForgetFactor
             CD.ReenforcementFactors = ReenforcementFactors
+            CD.key_detection_lookahead = KeyDetectionLookAhead
             if only_get_num_measures:
                 CD.loadFileAndGetMeasures(FullPath)
             else:

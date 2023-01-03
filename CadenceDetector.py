@@ -37,6 +37,7 @@ class CadenceDetector:
         self.NumMeasures = 0
         self.blockSize = 0
         self.overlap = 0
+        self.key_detection_lookahead = 0
         self.fileName = 0
         self.hasPickupMeasure = 0
         self.WritePath = 0
@@ -551,8 +552,12 @@ class CadenceDetector:
         self.overlap = overlap
         print("Num Measures:", self.NumMeasures)
         for currBlock in range(1, self.NumMeasures+1):
-            StopMeasure = min(currBlock + self.blockSize - 1, self.NumMeasures)
-            CurrMeasures = self.NoteStream.measures(currBlock, StopMeasure)
+            # this only looks at current bar and backwards, simulating realtime
+            lookahead = round((self.blockSize - 1) * self.key_detection_lookahead)
+            lookback = self.blockSize - lookahead - 1
+            StopMeasure = min(currBlock + lookahead, self.NumMeasures)
+            StartMeasure = max(currBlock - lookback, 0)
+            CurrMeasures = self.NoteStream.measures(StartMeasure, StopMeasure)
             #print(currBlock, StopMeasure)
             try:
                 #analysisClasses = [
@@ -706,45 +711,53 @@ class CadenceDetector:
                 lowestPitches.append(None)
         return lowestPitches
 
-    def detectAlbertiBassInMeasure(self, measure_chords, bass_chords, pattern_len):
+    def detectAlbertiOrArpeggioBassInMeasure(self, measure_chords, bass_chords, pattern_len, arp_type):
         #first exact bassline from chords
         measure_general_notes = measure_chords.recurse().getElementsByClass('GeneralNote')
         bass_general_notes = bass_chords.recurse().getElementsByClass('GeneralNote')
         lowest_pitches_in_bass = self.extractBassLine(bass_general_notes)
-        alberti_patterns = []
+        arp_patterns = []
 
         for i in range(0, len(bass_general_notes), pattern_len):
             if i+pattern_len <= len(bass_general_notes):
                 pattern_notes = lowest_pitches_in_bass[i:i+pattern_len]
                 if None not in pattern_notes:
-                    isAlberti = self.isAlbertiPattern(pattern_notes,pattern_len)
-                    if isAlberti:
-                        epsilon = 0.1 # this epsilon is required to mark the last alberti beat including its length, but not the next beat
-                        alberti_patterns.append({'start': bass_general_notes[i+1].beat, 'stop': bass_general_notes[i+pattern_len-1].beat + bass_general_notes[i+pattern_len-1].duration.quarterLength - epsilon})
+                    if arp_type == 'alberti':
+                        isArp = self.isAlbertiPattern(pattern_notes,pattern_len)
+                    elif arp_type == 'arp_up':
+                        isArp = self.isArpeggioPattern(pattern_notes, pattern_len, 'up')
+                    elif arp_type =='arp_down':
+                        isArp = self.isArpeggioPattern(pattern_notes, pattern_len, 'down')
+                    else:
+                        isArp = False
+                    if isArp:
+                        epsilon = 0.1  # this epsilon is required to mark the last alberti beat including its length, but not the next beat
+                        arp_patterns.append({'start': bass_general_notes[i + 1].beat,
+                                             'stop': bass_general_notes[i + pattern_len - 1].beat + bass_general_notes[i + pattern_len - 1].duration.quarterLength - epsilon})
 
-        albertiBeats = [0] * len(measure_general_notes)
+        arp_beats = [0] * len(measure_general_notes)
         for i,gen_note in enumerate(measure_general_notes):
-            for alberti_pat in alberti_patterns:
-                if alberti_pat['start'] <= gen_note.beat <= alberti_pat['stop']:
-                    albertiBeats[i] = True
+            for pat in arp_patterns:
+                if pat['start'] <= gen_note.beat <= pat['stop']:
+                    arp_beats[i] = True
                     break
 
-        return albertiBeats
+        return arp_beats
 
 
-    def detectArpeggioBassInMeasure(self, measure, arp_len):
-        # first exact bassline from chords
-        measure_general_notes = measure.recurse().getElementsByClass('GeneralNote')
-        lowest_pitches = self.extractBassLine(measure_general_notes)
-        arpeggioBeats = [0]*len(measure_general_notes)
-        for beat in range(0, len(measure_general_notes), arp_len):
-            if beat + arp_len <= len(measure_general_notes):
-                subsec = lowest_pitches[beat:beat+arp_len]
-                if None not in subsec:
-                    isArp = self.isArpeggioPattern(subsec, arp_len, 'up') #or self.isArpeggioPattern(subsec, arp_len, 'down')
-                    #keep first beat in pattern as non arpeggio
-                    arpeggioBeats[beat+1:beat+arp_len] = [isArp] * (arp_len - 1)
-        return arpeggioBeats
+    # def detectArpeggioBassInMeasure(self, measure, arp_len):
+    #     # first exact bassline from chords
+    #     measure_general_notes = measure.recurse().getElementsByClass('GeneralNote')
+    #     lowest_pitches = self.extractBassLine(measure_general_notes)
+    #     arpeggioBeats = [0]*len(measure_general_notes)
+    #     for beat in range(0, len(measure_general_notes), arp_len):
+    #         if beat + arp_len <= len(measure_general_notes):
+    #             subsec = lowest_pitches[beat:beat+arp_len]
+    #             if None not in subsec:
+    #                 isArp = self.isArpeggioPattern(subsec, arp_len, 'up') #or self.isArpeggioPattern(subsec, arp_len, 'down')
+    #                 #keep first beat in pattern as non arpeggio
+    #                 arpeggioBeats[beat+1:beat+arp_len] = [isArp] * (arp_len - 1)
+    #     return arpeggioBeats
 
     def smoothKeyInterpretations(self, measureIndex):
         currInterpretations = self.InterpretationsPerMeasure[measureIndex]
@@ -757,7 +770,6 @@ class CadenceDetector:
             currSmoothedVal = self.KeyDetectionForgetFactor * currSmoothedVal + (1-self.KeyDetectionForgetFactor) * corrCoef
             self.CurrSmoothedInterpretations[keyString] = currSmoothedVal
 
-
     def getTopNKeyInterpretations(self, N):
         #now sort by value
         SortedKeys = sorted(self.CurrSmoothedInterpretations.items(), key=lambda x: x[1], reverse=True)
@@ -767,7 +779,8 @@ class CadenceDetector:
 
     def getNotesPerChordBeatPerPart(self, ChordsMeasure, NotesMeasure):
         Parts = NotesMeasure.recurse().getElementsByClass(m21.stream.Part)
-        notesPerChordBeatPerPart = [[[real_note for real_note in part.flat.notesAndRests if chord.beat == real_note.beat] for part in Parts] for chord in ChordsMeasure.recurse().getElementsByClass('GeneralNote')]
+        parts_flat = [part.flat.notesAndRests for part in Parts]
+        notesPerChordBeatPerPart = [[[real_note for real_note in part if chord.beat == real_note.beat] for part in parts_flat] for chord in ChordsMeasure.recurse().getElementsByClass('GeneralNote')]
         return notesPerChordBeatPerPart
 
 
@@ -796,7 +809,7 @@ class CadenceDetector:
         try:
             for currMeasureIndex in range(0,self.NumMeasures):
                 # debug per measure
-                if currMeasureIndex == 3:
+                if currMeasureIndex == 43:
                     bla = 0
                 # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
                 # for example, data that originates from midi cannot contain this info
@@ -829,15 +842,17 @@ class CadenceDetector:
 
                 NotesPerChordBeatPerPart = self.getNotesPerChordBeatPerPart(CurrMeasures, CurrMeasuresNotes)
 
-                AlbertiBeats4 = self.detectAlbertiBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=4)
+                AlbertiBeats4 = self.detectAlbertiOrArpeggioBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=4, arp_type='alberti')
                 AlbertiBeats = AlbertiBeats4
-                if curr_time_sig.ratioString in ['3/4','6/8','3/8']:
-                    AlbertiBeats6 = self.detectAlbertiBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=6)
+                if curr_time_sig.ratioString in ['3/4', '6/8', '3/8']:
+                    AlbertiBeats6 = self.detectAlbertiOrArpeggioBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=6, arp_type='alberti')
                     AlbertiBeats = [x or y for (x, y) in zip(AlbertiBeats4, AlbertiBeats6)]
 
-                ArpeggioBeats3 = self.detectArpeggioBassInMeasure(CurrMeasuresRestless, arp_len=3)
-                ArpeggioBeats4 = self.detectArpeggioBassInMeasure(CurrMeasuresRestless, arp_len=4)
-                ArpeggioBeats = [x or y for (x, y) in zip(ArpeggioBeats3, ArpeggioBeats4)]
+                ArpeggioBeats4 = self.detectAlbertiOrArpeggioBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=4, arp_type='arp_up')
+                ArpeggioBeats = ArpeggioBeats4
+                if curr_time_sig.ratioString in ['3/4', '6/8', '3/8']:
+                    ArpeggioBeats3 = self.detectAlbertiOrArpeggioBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=3, arp_type='arp_up')
+                    ArpeggioBeats = [x or y for (x, y) in zip(ArpeggioBeats3, ArpeggioBeats4)]
 
                 LyricPerBeat = []
 
@@ -1037,13 +1052,15 @@ class CadenceDetector:
         self.ChordStream.show()
 
     def writeAnalyzedFile(self):
-        if self.NumMeasures <= 300:
+        max_num_measures_for_writing = 400
+        if self.NumMeasures <= max_num_measures_for_writing:
             fileName = self.fileName.replace(".", "_")
             fileName = (f"{fileName}_Analyzed.xml")
             FullPath = os.path.join(self.WritePath, fileName)
             self.NoteStream.write(fp=FullPath)
         else:
-            print('file too long for writing. Num measures:', self.NumMeasures)
+            print(f'file too long for writing. Max num measures for writing is {max_num_measures_for_writing}.'
+                  f'Num measures is:', self.NumMeasures)
 
     def displayFull(self):
         self.NoteStream.show()
