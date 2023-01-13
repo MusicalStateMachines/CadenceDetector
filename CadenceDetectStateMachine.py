@@ -216,10 +216,22 @@ class CDStateMachine(object):
         return retVal
 
     def isLeadingToneSoprano(self):
-        return self.CurrHarmonicState.Chord.pitches[-1].pitchClass == self.CurrHarmonicState.Key.pitchFromDegree(7).pitchClass
+        interval_to_tonic = self.CurrHarmonicState.Chord.sortFrequencyAscending().pitches[-1].pitchClass - self.CurrHarmonicState.Key.tonic.pitchClass
+        return interval_to_tonic % 12 == 11
+
+    def isSopranoOnSemitonesFromTonic(self, intervalsFromTonic):
+        interval_to_tonic = self.CurrHarmonicState.Chord.sortFrequencyAscending().pitches[-1].pitchClass - self.CurrHarmonicState.Key.tonic.pitchClass
+        return interval_to_tonic % 12 in intervalsFromTonic
 
     def isLeadingToneBass(self):
-        return self.compareBassWithPitch(self.CurrHarmonicState.Key.pitchFromDegree(7).pitchClass)
+        retVal = False
+        bassPitch = self.getBassFromChord(self.CurrHarmonicState.Chord, favor_by_part=True)
+        if not bassPitch:
+            bassPitch = self.getBassFromChord(self.CurrHarmonicState.ChordWithBassRests, favor_by_part=True)
+        if bassPitch:
+            interval_to_tonic = bassPitch.pitchClass - self.CurrHarmonicState.Key.tonic.pitchClass
+            retVal = interval_to_tonic % 12 == 11
+        return retVal
 
     def isRootedHarmony(self):
         return self.compareBassWithPitch(self.CurrHarmonicState.Chord.root().pitchClass, mode='any')
@@ -502,12 +514,8 @@ class CDStateMachine(object):
 
         elif curr_state == CDCadentialStates.PACAppoggExpected or curr_state == CDCadentialStates.BassAppoggExpected:
 
-            if self.CurrHarmonicState.ChordWithBassRests.isRest or self.tryGetBeatStrength() == 1: # rest or new measure, exit appoggiatura:
+            if self.CurrHarmonicState.ChordWithBassRests.isRest or (self.tryGetBeatStrength() == 1): # and not self.isTonicBass()): # rest or new measure not on tonic, exit appoggiatura:
                 curr_state = CDCadentialStates.CadExpected
-            #elif self.isSecondaryDominantLeadingTone():
-            #    curr_state = CDCadentialStates.HCArrivalExpected
-            #elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
-            #    curr_state = curr_state
             else:
             # ==appoggiatura, check bass still on key and if soprano is root then PAC otherwise IAC
                 if curr_state ==  CDCadentialStates.BassAppoggExpected and (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
@@ -655,9 +663,11 @@ class CDStateMachine(object):
         self.checkStateChanged()
 
     def checkAppoggiatura(self, curr_state):
-        if curr_state == CDCadentialStates.CadInevitable and (self.isSopraneOnDegree(7) or self.isSopraneOnDegree(2) or self.isSopraneOnDegree(3)):
+        if curr_state == CDCadentialStates.CadInevitable and \
+                ((self.CurrHarmonicState.Key.mode == 'major' and self.isSopranoOnSemitonesFromTonic([11, 2, 4])) or
+                 (self.CurrHarmonicState.Key.mode == 'minor' and self.isSopranoOnSemitonesFromTonic([10, 11, 2, 3]))):
             curr_state = CDCadentialStates.PACAppoggExpected
-        elif curr_state == CDCadentialStates.IACArrivalExpected and self.isSopraneOnDegree(2) or self.isSopraneOnDegree(4):
+        elif curr_state == CDCadentialStates.IACArrivalExpected and self.isSopranoOnSemitonesFromTonic([2, 5]):
             curr_state = CDCadentialStates.IACAppoggExpected
         else:
             curr_state = CDCadentialStates.CadAvoided
@@ -666,7 +676,7 @@ class CDStateMachine(object):
     def checkBassAppoggiatura(self, curr_state):
         if curr_state == CDCadentialStates.CadInevitable and self.isSopraneOnDegree(1):
             curr_state = CDCadentialStates.BassAppoggExpected
-        elif curr_state == CDCadentialStates.IACArrivalExpected and (self.isSopraneOnDegree([1, 2 , 3, 7])):
+        elif curr_state == CDCadentialStates.IACArrivalExpected and (self.isSopraneOnDegree([1, 2, 3, 7]) or self.isLeadingToneSoprano()):
             curr_state = CDCadentialStates.IACAppoggExpected
         elif curr_state == CDCadentialStates.IACArrivalExpected and (self.isSopranoAtSemitoneFromDegree(1, [1, 3])):
             curr_state = CDCadentialStates.IACAppoggExpected
