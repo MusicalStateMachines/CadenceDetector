@@ -420,8 +420,8 @@ class CDStateMachine(object):
         # ========================================================
         elif curr_state==CDCadentialStates.CadInevitable or curr_state==CDCadentialStates.IACArrivalExpected:
             #on dominant and then a complete rest --> HC
-            if self.CurrHarmonicState.ChordWithBassRests.isRest or self.isBassPartRest():
-                if curr_state==CDCadentialStates.CadInevitable and self.tryGetBeatStrength() < 1.0 and self.verifyNotI64(HarmonicState=self.PrevHarmonicState):
+            if self.CurrHarmonicState.ChordWithBassRests.isRest or (self.isBassPartRest() and self.verifyHCGrouping(self.CurrHarmonicState) and not self.isSopraneOnDegree(1)):
+                if curr_state==CDCadentialStates.CadInevitable and self.verifyNotI64(HarmonicState=self.PrevHarmonicState):
                     curr_state = CDCadentialStates.HCArrival
                     self.WeightOfLastCadence = self.tryGetBeatStrength()
                 else:
