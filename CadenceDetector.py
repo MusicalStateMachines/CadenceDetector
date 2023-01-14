@@ -667,8 +667,8 @@ class CadenceDetector:
         Music21StringMode = SearStringMode.replace("M","m")
         return m21.key.Key(Music21StringKey,Music21StringMode)
 
-    def isArpeggioPattern(self, pitches, arp_len, up_down=None):
-        if len(pitches) < arp_len:
+    def isArpeggioPattern(self, pitches, lengths, arp_len, up_down=None):
+        if len(pitches) < arp_len or not all(lengths[0] == l for l in lengths[1:4]):
             retVal = False
         else:
             retVal = True
@@ -694,22 +694,26 @@ class CadenceDetector:
                     retVal = False
         return retVal
 
-    def isAlbertiPattern(self, pitches, pattern_len):
-        retVal =  all(x.midi >= pitches[0].midi for x in pitches[1:4]) and pitches[1].midi == pitches[3].midi
+    def isAlbertiPattern(self, pitches, lengths, pattern_len):
+        retVal = all(lengths[0] == l for l in lengths[1:4])
+        retVal = retVal and all(x.midi >= pitches[0].midi for x in pitches[1:4]) and pitches[1].midi == pitches[3].midi
         # for pattern length 6 (3/4,3/8,6/8) verify last two as well, either continuing the same pattern or repeating the bass
         if pattern_len == 6:
+            retVal = all(lengths[0] == l for l in lengths)
             retVal = retVal and (pitches[3].midi == pitches[5].midi or pitches[0] == pitches[4])
         return retVal
 
     def extractBassLine(self, measure):
         lowestPitches = []
+        quarterLengths= []
         for chord in measure:
             if not chord.isRest:
-                lowestPitch = chord.sortFrequencyAscending().pitches[0]
-                lowestPitches.append(lowestPitch)
+                lowestNote = chord.sortFrequencyAscending()[0]
+                lowestPitches.append(lowestNote.pitch)
+                quarterLengths.append(lowestNote.quarterLength)
             else:
                 lowestPitches.append(None)
-        return lowestPitches
+        return {'pitches': lowestPitches, 'lengths': quarterLengths}
 
     def detectAlbertiOrArpeggioBassInMeasure(self, measure_chords, bass_chords, pattern_len, arp_type):
         #first exact bassline from chords
@@ -720,14 +724,15 @@ class CadenceDetector:
 
         for i in range(0, len(bass_general_notes), pattern_len):
             if i+pattern_len <= len(bass_general_notes):
-                pattern_notes = lowest_pitches_in_bass[i:i+pattern_len]
-                if None not in pattern_notes:
+                curr_pitches = lowest_pitches_in_bass['pitches'][i:i+pattern_len]
+                curr_lengths = lowest_pitches_in_bass['lengths'][i:i+pattern_len]
+                if None not in curr_pitches:
                     if arp_type == 'alberti':
-                        isArp = self.isAlbertiPattern(pattern_notes,pattern_len)
+                        isArp = self.isAlbertiPattern(pitches=curr_pitches, lengths=curr_lengths, pattern_len=pattern_len)
                     elif arp_type == 'arp_up':
-                        isArp = self.isArpeggioPattern(pattern_notes, pattern_len, 'up')
+                        isArp = self.isArpeggioPattern(pitches=curr_pitches, lengths=curr_lengths, arp_len=pattern_len, up_down='up')
                     elif arp_type =='arp_down':
-                        isArp = self.isArpeggioPattern(pattern_notes, pattern_len, 'down')
+                        isArp = self.isArpeggioPattern(pitches=curr_pitches, lengths=curr_lengths, arp_len=pattern_len, up_down='down')
                     else:
                         isArp = False
                     if isArp:
@@ -743,21 +748,6 @@ class CadenceDetector:
                     break
 
         return arp_beats
-
-
-    # def detectArpeggioBassInMeasure(self, measure, arp_len):
-    #     # first exact bassline from chords
-    #     measure_general_notes = measure.recurse().getElementsByClass('GeneralNote')
-    #     lowest_pitches = self.extractBassLine(measure_general_notes)
-    #     arpeggioBeats = [0]*len(measure_general_notes)
-    #     for beat in range(0, len(measure_general_notes), arp_len):
-    #         if beat + arp_len <= len(measure_general_notes):
-    #             subsec = lowest_pitches[beat:beat+arp_len]
-    #             if None not in subsec:
-    #                 isArp = self.isArpeggioPattern(subsec, arp_len, 'up') #or self.isArpeggioPattern(subsec, arp_len, 'down')
-    #                 #keep first beat in pattern as non arpeggio
-    #                 arpeggioBeats[beat+1:beat+arp_len] = [isArp] * (arp_len - 1)
-    #     return arpeggioBeats
 
     def smoothKeyInterpretations(self, measureIndex):
         currInterpretations = self.InterpretationsPerMeasure[measureIndex]
@@ -809,7 +799,7 @@ class CadenceDetector:
         try:
             for currMeasureIndex in range(0,self.NumMeasures):
                 # debug per measure
-                if currMeasureIndex == 43:
+                if currMeasureIndex == 47:
                     bla = 0
                 # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
                 # for example, data that originates from midi cannot contain this info

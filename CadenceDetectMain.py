@@ -13,7 +13,7 @@ XMLFileEnding = ".xml"
 # haydn singe file
 #XMLFileEnding = "op064_no04_mv01.xml"
 # mozart single file
-# XMLFileEnding = "K457-3.xml"
+# XMLFileEnding = "570-3.xml"
 # beethoven single file
 # XMLFileEnding = "op130_no13_mov6.mxl"
 # multi-core processing
