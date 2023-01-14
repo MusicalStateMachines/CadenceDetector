@@ -433,10 +433,10 @@ class CDStateMachine(object):
                 curr_state = curr_state
             else:
                 # for the case where in IAC expected and dominant appears again, the back to Cad inevitable (TBD, separate these states)
-                if self.isDominantBass(favor_by_part=True) and not (curr_state==CDCadentialStates.IACArrivalExpected and self.isSopraneOnDegree(1)):
+                if not self.isBassPartRest() and self.isDominantBass(favor_by_part=True) and not (curr_state==CDCadentialStates.IACArrivalExpected and self.isSopraneOnDegree(1)):
                     curr_state = CDCadentialStates.CadInevitable
                 # meter - look for cadences on strong beat:
-                elif self.tryGetBeatStrength() >= 0.25:#cadence can only occur on strong beats (TBD - syncopa?)
+                elif self.tryGetBeatStrength() >= 0.25:#cadence can only occur on strong beats
                     # harmony  - chordal degree and bass analysis
                     # bass rest on strong beat --> HC
                     if curr_state==CDCadentialStates.CadInevitable and\
