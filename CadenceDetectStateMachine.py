@@ -518,9 +518,12 @@ class CDStateMachine(object):
                 curr_state = CDCadentialStates.CadExpected
             else:
             # ==appoggiatura, check bass still on key and if soprano is root then PAC otherwise IAC
+            # ==for bass appoggiatura check  that soprano is still on tonic and that bass is also.
+            # ==grouping is not required becuase it was verified on the appoggiatura entrance
+            # ==in case of alberti or arppeggio the original bass on entrance remains, so tonic bass verification is not required.
                 if curr_state ==  CDCadentialStates.BassAppoggExpected and (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
                     curr_state = curr_state
-                elif self.isTonicBass():
+                elif self.isTonicBass() or (curr_state == CDCadentialStates.PACAppoggExpected and (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio)):
                     if self.isSopraneOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC'):
                         curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival)
                     elif self.isSopraneOnDegree([3, 5]) and self.verifySopranoVoiceLeading(cadence_type='IAC'):
