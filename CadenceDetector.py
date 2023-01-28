@@ -48,6 +48,9 @@ class CadenceDetector:
         self.EmptyMeasures = []
         self.ReenforcementFactors = []
         self.FinalBarlines = []
+        self.analysis_full = []
+        self.analysis_filtered = []
+        self.analysis_transition_strings = []
 
     def loadMusic21Corpus(self,fileString):
         self.NoteStream = m21.corpus.parse(fileString)
@@ -776,12 +779,8 @@ class CadenceDetector:
 
     def detectCadences(self):
         print("Detecting cadences...")
-        fileName = self.fileName.replace(".", "_")
-        FullPath = os.path.join(self.WritePath, fileName)
-        text_file = open(f"{FullPath}_Analyzed.txt", "w")
-        print(f"NumMeasures: {self.NumMeasures}", file=text_file)
-        text_fileOffsets = open(f"{FullPath}_Analyzed_OffsetsNums.txt", "w")
-        text_fileTransitions = open(f"{FullPath}_Analyzed_Transitions.txt", "w")
+        self.analysis_full = []
+        self.analysis_transition_strings = []
 
         measuresSecondsMap = list(filter(lambda d: d['durationSeconds'] > 0, self.ChordStreamRestless.secondsMap))
 
@@ -799,7 +798,7 @@ class CadenceDetector:
         try:
             for currMeasureIndex in range(0,self.NumMeasures):
                 # debug per measure
-                if currMeasureIndex == 47:
+                if currMeasureIndex == 3:
                     bla = 0
                 # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
                 # for example, data that originates from midi cannot contain this info
@@ -918,7 +917,7 @@ class CadenceDetector:
                         thisChord.lyric = Lyric
                         LyricPerBeat.append([thisChord.beat,Lyric])
                         #TBD - do we still need to print this?
-                        print(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds'] + measuresSecondsMap[currMeasureIndex]['durationSeconds']*(thisChord.beat-1)/CurrMeasuresRestless.duration.quarterLength:.1f} {self.HarmonicStateMachine.getCadentialOutput().value}", file=text_fileTransitions)
+                        self.analysis_transition_strings.append(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds'] + measuresSecondsMap[currMeasureIndex]['durationSeconds']*(thisChord.beat-1)/CurrMeasuresRestless.duration.quarterLength:.1f} {self.HarmonicStateMachine.getCadentialOutput().value}")
 
                 #if self.HarmonicStateMachine.PACPending and len(LyricPerBeat) > 0:  # PAC reversion at end of measure in case PAC state was not exited within the measure
                 #    for i,curr_tup in enumerate(LyricPerBeat):
@@ -931,20 +930,10 @@ class CadenceDetector:
                 for LyricTuple in LyricPerBeat:
                     Lyric = LyricTuple[1]
                     if "PAC" in Lyric or "IAC" in Lyric or "HC" in Lyric or "PCC" in Lyric:
-                        if "PAC" in Lyric:
-                            CadString = "PAC"
-                        elif "IAC" in Lyric:
-                            CadString = "IAC"
-                        elif "HC" in Lyric:
-                            CadString = "HC"
-                        elif "PCC" in Lyric:
-                            CadString = "PCC"
-                        CadStringToNumMap = {"PAC": CDCadentialStates.PACArrival.value, "IAC": CDCadentialStates.IACArrival.value, "HC": CDCadentialStates.HCArrival.value, "PCC": CDCadentialStates.PCCArrival.value}
                         # incomplete and empty counters count measures that should be discarded
                         measure_to_write = measure_number - self.hasPickupMeasure - empty_measure_counter
                         print('Measure ', measure_to_write, ' offset ', measuresSecondsMap[currMeasureIndex]['offsetSeconds'], " ", Lyric)
-                        print(f"Measure: {measure_to_write} Offset: {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {Lyric}", file=text_file)
-                        print(f"{measure_to_write} {measuresSecondsMap[currMeasureIndex]['offsetSeconds']} {CadStringToNumMap[CadString]}", file=text_fileOffsets)
+                        self.analysis_full.append({"Measure": measure_to_write, "Offset": measuresSecondsMap[currMeasureIndex]['offsetSeconds'], "Lyric": Lyric})
                     elif "Key" in Lyric:
                         print(Lyric)
 
@@ -991,13 +980,13 @@ class CadenceDetector:
             print(f"Exception occurred on measure {measure_number}")
             raise
 
-        text_file.close()
-        text_fileOffsets.close()
-        text_fileTransitions.close()
         for c in self.ChordStreamRestless.recurse().getElementsByClass('Chord'):
             c.closedPosition(forceOctave=4, inPlace=True)
         # this adds the restless chord stream to the note stream
         # self.NoteStream.insert(0, self.ChordStream)
+        self.filter_notestream_by_language_model()
+        self.filter_analysis_by_language_model()
+        self.write_analysis_to_files()
 
         if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
             print("Writing cadence corrected keys to file...")
@@ -1009,6 +998,98 @@ class CadenceDetector:
             CoefsFile = f"{FullPath}_Coefs_{self.KeyDetectionMode}.txt"
             with open(CoefsFile, 'wb') as f:
                 pickle.dump(coefs_per_measure, f)
+
+
+    def filter_notestream_by_language_model(self):
+        print('Filtering lyrics by language model...')
+        PrevMeasureNotes = None
+        PrevMeasureLyrics = None
+        PrevParts = None
+        for currMeasureIndex in range(0, self.NumMeasures):
+            measure_number = currMeasureIndex + 1
+            CurrMeasuresNotes = self.NoteStream.measure(measure_number)
+            CurrParts = CurrMeasuresNotes.recurse().getElementsByClass(m21.stream.Part)
+            CurrMeasuresLyrics = []
+            for part in CurrParts:
+                for thisNote in part.flat.notesAndRests:
+                    CurrMeasuresLyrics.append(thisNote.lyric)
+            if PrevMeasureNotes and PrevMeasureLyrics:
+                # PAC, HC or PCC cancel previous HC
+                if 'HC' in PrevMeasureLyrics and ('PAC' in CurrMeasuresLyrics or 'HC' in CurrMeasuresLyrics or 'PCC' in CurrMeasuresLyrics):
+                    print(f'Filtering HC in measure {measure_number-1}')
+                    for part in PrevParts:
+                        for thisNote in part.flat.notesAndRests:
+                            thisNote.lyric = thisNote.lyric.replace('HC', '')
+                # HC cancels previous IAC
+                if 'IAC' in PrevMeasureLyrics and 'HC' in CurrMeasuresLyrics:
+                    print(f'Filtering IAC in measure {measure_number - 1}')
+                    for part in PrevParts:
+                        for thisNote in part.flat.notesAndRests:
+                            thisNote.lyric = thisNote.lyric.replace('IAC', '')
+                # PAC cancels forward HC
+                if 'PAC' in PrevMeasureLyrics and 'HC' in CurrMeasuresLyrics:
+                    print(f'Filtering HC in measure {measure_number}')
+                    for part in CurrParts:
+                        for thisNote in part.flat.notesAndRests:
+                            thisNote.lyric = thisNote.lyric.replace('HC', '')
+            PrevMeasureNotes = CurrMeasuresNotes
+            PrevMeasureLyrics = CurrMeasuresLyrics
+            PrevParts = CurrParts
+
+    def filter_analysis_by_language_model(self):
+        print('Filtering analysis results by language model...')
+        self.analysis_full_filtered = copy.deepcopy(self.analysis_full)
+        items_to_remove = []
+        prev_cad = None
+        for item in self.analysis_full_filtered:
+            curr_cad = item
+            if prev_cad:
+                if curr_cad['Measure'] - prev_cad['Measure'] <= 1:
+                    # PAC, HC and PCC cancels HC
+                    if prev_cad['Lyric'] == 'HC' and curr_cad['Lyric'] != 'IAC':
+                        print(f"Filtering HC in measure {prev_cad['Measure']}")
+                        if prev_cad not in items_to_remove: items_to_remove.append(prev_cad)
+                    # HC cancels IAC
+                    if prev_cad['Lyric'] == 'IAC' and curr_cad['Lyric'] == 'HC':
+                        print(f"Filtering IAC in measure {prev_cad['Measure']}")
+                        if prev_cad not in items_to_remove: items_to_remove.append(prev_cad)
+                    # PAC cancels HC forwards
+                    if prev_cad['Lyric'] == 'PAC' and curr_cad['Lyric'] == 'HC':
+                        print(f"Filtering HC in measure {curr_cad['Measure']}")
+                        if curr_cad not in items_to_remove: items_to_remove.append(curr_cad)
+            prev_cad = curr_cad
+        for item in items_to_remove:
+            self.analysis_full_filtered.remove(item)
+
+    def write_analysis_to_files(self):
+        fileName = self.fileName.replace(".", "_")
+        FullPath = os.path.join(self.WritePath, fileName)
+        text_file = open(f"{FullPath}_Analyzed.txt", "w")
+        print(f"NumMeasures: {self.NumMeasures}", file=text_file)
+        text_fileOffsets = open(f"{FullPath}_Analyzed_OffsetsNums.txt", "w")
+        text_fileTransitions = open(f"{FullPath}_Analyzed_Transitions.txt", "w")
+
+        for item in self.analysis_full_filtered:
+            print(f"Measure: {item['Measure']} Offset: {item['Offset']} {item['Lyric']}", file=text_file)
+            Lyric = item['Lyric']
+            if "PAC" in Lyric:
+                CadString = "PAC"
+            elif "IAC" in Lyric:
+                CadString = "IAC"
+            elif "HC" in Lyric:
+                CadString = "HC"
+            elif "PCC" in Lyric:
+                CadString = "PCC"
+            CadStringToNumMap = {"PAC": CDCadentialStates.PACArrival.value, "IAC": CDCadentialStates.IACArrival.value,
+                                 "HC": CDCadentialStates.HCArrival.value, "PCC": CDCadentialStates.PCCArrival.value}
+            print(f"{item['Measure']} {item['Offset']} {CadStringToNumMap[CadString]}", file=text_fileOffsets)
+
+        for item in self.analysis_transition_strings:
+            print(item, file=text_fileTransitions)
+
+        text_file.close()
+        text_fileOffsets.close()
+        text_fileTransitions.close()
 
     def check_and_update_timesig(self, CurrMeasures, measure_time_sig):
         if CurrMeasures:
