@@ -6,6 +6,7 @@ import copy
 class CDStateMachine(object):
     def __init__(self):
         self.NumParts = 0
+        self.MeasureCounter = 0 # measure counter is for the entire movement and not included in reset
         self.reset()
 
     def reset(self):
@@ -21,7 +22,6 @@ class CDStateMachine(object):
         self.FirstKeyDetectionDone = 0
         self.CadentialKeyChange = 0
         self.TriggerString = str("")
-        self.MeasureCounter = 0
         self.PostCadenceMeasureCounter = MinPostCadenceMeasures
         self.CheckBassPartFromChord = False
         self.PACPending = False
