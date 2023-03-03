@@ -11,16 +11,16 @@ MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 # all files
 XMLFileEnding = ".xml"
 # haydn singe file
-#XMLFileEnding = "op064_no04_mv01.xml"
+# XMLFileEnding = "op055_no03_mv01.xml"
 # mozart single file
-# XMLFileEnding = "570-3.xml"
+# XMLFileEnding = "333-2.xml"
 # beethoven single file
 # XMLFileEnding = "op130_no13_mov6.mxl"
 # multi-core processing
 DoParallelProcessing = XMLFileEnding in ['.xml', '.mxl']
 
 # select analysis path
-InputFilePath = DCMLabMozartPath
+InputFilePath = SearsHaydnPath
 OutputFilePath = MyPath
 
 #===for testing a single file not in database
@@ -41,6 +41,7 @@ OnlyGetNumMeasures = False
 KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
 KeyDetectionBlockSizes = {SearsHaydnPath: 4, DCMLabMozartPath: 4, DCMBeethovenPath: 4} # in measures
 KeyDetectionBlockSize = KeyDetectionBlockSizes[InputFilePath]
+KeyDetectionOverlap = 1 / KeyDetectionBlockSize  # ratio from block size, this creates an step size of 1 measure
 KeyDetectionLookAhead = 0.5 # percentage from block size
 KeyDetectionForgetFactor = 0.8
 ReenforcementFactorsDict = {SearsHaydnPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2},
@@ -72,14 +73,12 @@ def findCadencesInFile(file, only_get_num_measures = False):
                 # set files
                 CD.setFileName(file)
                 CD.setWritePath(OutputFilePath)
-                # CD.loadMusic21Corpus(music21file)
-                overlap = 1 / KeyDetectionBlockSize  # ratio from block size, this creates an step size of 1 measure
                 # detect key per measure
                 if ReadKeyFromSears:
                     CD.getKeyPerMeasureFromSearsFile(FullPath)
                     CD.writeKeyPerMeasureToFile(KeyDetectionMode)
                 elif RunKeyDetection:
-                    CD.detectKeyPerMeasureWrapper(KeyDetectionBlockSize, overlap)
+                    CD.detectKeyPerMeasureWrapper(KeyDetectionBlockSize, KeyDetectionOverlap)
                     # write To file
                     CD.writeKeyPerMeasureToFile(KeyDetectionMode)
                 if RunCadenceDetection:

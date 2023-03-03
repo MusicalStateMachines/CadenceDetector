@@ -4,7 +4,7 @@ from enum import Enum
 #consts
 MaxNumMeasures = 500
 MinInitialMeasures = 2
-MinPostCadenceMeasures = 0
+MinPostCadenceMeasures = 2
 
 
 class CDCadentialStates(Enum):
@@ -45,7 +45,6 @@ class CDKeyDetectionModes(Enum):
     KSWithSmoothing = 2
     KSWithSmoothingCadenceSensitive = 3
 
-
 class CDHarmonicState:
     def __init__(self, Key, Chord, ChordWithRests, ChordDegree, ChordInversion, ChordFigure, Alberti, Arpeggio, TimeSig, RomanNumeral, RealNotes):
         self.Key = Key
@@ -59,7 +58,12 @@ class CDHarmonicState:
         self.Arpeggio = Arpeggio
         self.TimeSig = TimeSig
         self.RealNotes = RealNotes
-
+        # caching variables
+        self.bassPitchFavorByPart = [None, None]
+        self.sopranoPitch = None
+        self.isDominant = None
+        self.isTonic = None
+        self.isBassRest = None
 
 
 SUB = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")

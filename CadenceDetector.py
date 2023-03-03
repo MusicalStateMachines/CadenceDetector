@@ -11,8 +11,8 @@ import sys
 
 class CadenceDetector:
     def __init__(self):
-        self.HarmonicStateMachine = CDStateMachine()
-        self.HarmonicStateMachineChallenger = CDStateMachine()
+        self.HarmonicStateMachine = CDStateMachine(isChallenger=False)
+        self.HarmonicStateMachineChallenger = CDStateMachine(isChallenger=True)
         self.NoteStream = []
         self.NoteStreamRestless = []
         self.NoteStreamReduced = []
@@ -209,6 +209,24 @@ class CadenceDetector:
             if curr_barline.type == 'final':
                 measureIndex = curr_barline.measureNumber - 1
                 self.FinalBarlines[measureIndex] = 1
+
+    def measureContainsFinalBarline(self, measure):
+        retVal = False
+        barlines = measure.recurse().getElementsByClass('Barline')
+        for curr_barline in barlines:
+            if curr_barline.type == 'final':
+                retVal = True
+                break
+        return retVal
+
+    def measureContainsVolta(self, measure):
+        retVal = False
+        RepeatBrackets = measure.recurse().getElementsByClass('RepeatBracket')
+        for repeat in RepeatBrackets:
+            for _ in repeat.spannerStorage:
+                retVal = True
+                break
+        return retVal
 
     def findIncompleteMeasures(self):
         print('Finding incomplete measures...')
@@ -699,7 +717,7 @@ class CadenceDetector:
 
     def isAlbertiPattern(self, pitches, lengths, pattern_len):
         retVal = all(lengths[0] == l for l in lengths[1:4])
-        retVal = retVal and all(x.midi >= pitches[0].midi for x in pitches[1:4]) and pitches[1].midi == pitches[3].midi
+        retVal = retVal and all(x.midi >= pitches[0].midi for x in pitches[1:4]) and (pitches[1].midi == pitches[3].midi or pitches[0].midi == pitches[2].midi)
         # for pattern length 6 (3/4,3/8,6/8) verify last two as well, either continuing the same pattern or repeating the bass
         if pattern_len == 6:
             retVal = all(lengths[0] == l for l in lengths)
@@ -798,7 +816,7 @@ class CadenceDetector:
         try:
             for currMeasureIndex in range(0,self.NumMeasures):
                 # debug per measure
-                if currMeasureIndex == 3:
+                if currMeasureIndex == 80:
                     bla = 0
                 # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
                 # for example, data that originates from midi cannot contain this info
@@ -814,8 +832,8 @@ class CadenceDetector:
                 # check and update timesig
                 curr_time_sig = self.check_and_update_timesig(CurrMeasures, curr_time_sig)
 
-                # reset state machines after repeat brackets (TBD  - add double barlines to this)
-                if currMeasureIndex > 0 and self.FinalBarlines[currMeasureIndex-1]:
+                # reset state machines after repeat brackets, unless cadence inevitable (TBD  - add double barlines to this)
+                if currMeasureIndex > 0 and self.FinalBarlines[currMeasureIndex-1] and not (self.HarmonicStateMachine.getCadentialOutput() == CDCadentialStates.CadInevitable):
                     self.HarmonicStateMachine.reset()
                     self.HarmonicStateMachineChallenger.reset()
 
@@ -1114,6 +1132,8 @@ class CadenceDetector:
                 self.HarmonicStateMachineChallenger = copy.deepcopy(tempStateMachine)
         self.PrevKeyString = currKeyString
         self.PrevChallengerKeyString = challengerKeyString
+        self.HarmonicStateMachine.IsChallenger = False
+        self.HarmonicStateMachineChallenger.IsChallenger = True
 
     def setFileName(self,fileName):
         self.fileName = fileName

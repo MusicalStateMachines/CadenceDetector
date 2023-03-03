@@ -78,7 +78,7 @@ def plot_diachronic_analysis(mov_str, table_diachronically_sorted):
     coef = np.polyfit(x, PAC_density_per_mov, 1)
     poly1d_fn = np.poly1d(coef)
     # poly1d_fn is now a function which takes in x and returns an estimate for y
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(20, 12))
     ax.plot(PAC_density_per_mov)
     ax.plot(x, poly1d_fn(x), '--k')
     ax.locator_params(nbins=len(PAC_density_per_mov), axis='x')
@@ -86,12 +86,13 @@ def plot_diachronic_analysis(mov_str, table_diachronically_sorted):
     ax.set_xticklabels(mov_str, rotation=45, size=8)
     plt.ylim(0, 25)
     if TestData == SearsData or TestData == ABCData:
-        plt.xlabel('Op. No. Mv.', size=10)
+        plt.xlabel('Op. No. Mv.', size=12)
     elif TestData == DCMData:
-        plt.xlabel('K. Mv.', size=10)
-    plt.ylabel('PAC Density %', size=10)
-    plt.title(f'PAC Density per Movement in {TestData.Label} Diachronically Sorted', size=12)
-    plt.show()
+        plt.xlabel('K. Mv.', size=12)
+    plt.ylabel('PAC Density %', size=12)
+    plt.title(f'PAC Density per Movement in {TestData.Label} Diachronically Sorted', size=14)
+    plt.show(block=False)
+    plt.savefig(f'PAC Density Per Movement {TestData.Label}.png')
 
 #=======Main script=========
 SearsData = LabeledData()
@@ -127,8 +128,9 @@ ABCData.Composer = "Beethoven"
 # ==================================
 # set which database to compare to
 # ==================================
-TestData = DCMData
+TestData = SearsData
 optimize_false_positives = False
+CadenceString = "PAC"
 
 # set state machine data
 StateMachineData = LabeledData()
@@ -145,7 +147,6 @@ TotalStateMachine = []
 TotalCommonPacs = []
 TotalFP = []
 TotalFN = []
-CadenceString = "PAC"
 NumMeasuresString = "NumMeasures"
 NumMeasuresIndex = 1
 

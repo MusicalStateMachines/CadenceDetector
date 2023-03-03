@@ -4,9 +4,10 @@ import numpy as np
 import copy
 
 class CDStateMachine(object):
-    def __init__(self):
+    def __init__(self, isChallenger=False):
         self.NumParts = 0
         self.MeasureCounter = 0 # measure counter is for the entire movement and not included in reset
+        self.IsChallenger = isChallenger
         self.reset()
 
     def reset(self):
@@ -371,7 +372,10 @@ class CDStateMachine(object):
         #do nothing
             curr_state = curr_state
         if curr_state == CDCadentialStates.Idle:
-            if self.CurrHarmonicState.ChordWithBassRests.isRest and not self.PrevHarmonicState.Chord.isRest:
+            if (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
+                # do nothing
+                curr_state = curr_state
+            elif self.CurrHarmonicState.ChordWithBassRests.isRest and not self.PrevHarmonicState.Chord.isRest:
                 if self.tryGetBeatStrength() < 1.0:
                     #if sudden rest and not on strongest beat, check if previous harmony was dominant
                     if isinstance(self.PrevHarmonicState.Key, key.Key):
@@ -394,6 +398,9 @@ class CDStateMachine(object):
                 curr_state = CDCadentialStates.CadExpected
             elif self.compareBassWithPitch(self.CurrHarmonicState.Key.pitchFromDegree(6).pitchClass, mode='any'):
                 #== bass in 6th degree - VI or IV6 go to expecting cadence
+                curr_state = CDCadentialStates.CadExpected
+            elif self.tryGetBeatStrength() >= 0.5 and self.compareBassWithPitch(self.CurrHarmonicState.Key.pitchFromDegree(3).pitchClass, mode='any'):
+                #== bass in 3rd degree - iii or I6 on strong beat go to expecting cadence
                 curr_state = CDCadentialStates.CadExpected
 
         # ==========================================
@@ -536,7 +543,7 @@ class CDStateMachine(object):
                 if curr_state ==  CDCadentialStates.BassAppoggExpected and (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
                     curr_state = curr_state
                 elif self.isTonicBass() or (curr_state == CDCadentialStates.PACAppoggExpected and (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio)) and self.CurrHarmonicState.Chord.isConsonant() and not self.harmonyContainsPitchDegree(HarmonicState=self.CurrHarmonicState, degree=6):
-                    if self.isSopraneOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC'):
+                    if self.isSopraneOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC') and (not self.IsChallenger or self.verifyPACGrouping(self.CurrHarmonicState)):
                         curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival)
                     elif self.isSopraneOnDegree(3) and self.verifySopranoVoiceLeading(cadence_type='IAC') and self.verifyIACGrouping(HarmonicState=self.CurrHarmonicState):
                         curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival)
@@ -552,7 +559,7 @@ class CDStateMachine(object):
                 curr_state = CDCadentialStates.CadExpected
             else:
                 if self.isTonicBass():
-                    if (self.isSopraneOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC')) or (self.isSopraneOnDegree([3, 5]) and self.verifySopranoVoiceLeading(cadence_type='IAC')):
+                    if ((self.isSopraneOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC')) or (self.isSopraneOnDegree([3, 5]) and self.verifySopranoVoiceLeading(cadence_type='IAC'))) and (not self.IsChallenger or self.verifyPACGrouping(self.CurrHarmonicState)):
                         if self.CurrHarmonicState.Chord.isConsonant() and not self.harmonyContainsPitchDegree(HarmonicState=self.CurrHarmonicState, degree=6):
                             curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival)
                 elif self.isDominantBass(): # dominant bass, go to PAC appogiatura
