@@ -33,6 +33,7 @@ def compute_classification_scores():
     Accuracy = (TP + TN) / (TP + TN + FP + FN)
     Specificity = TN / (FP + TN)
     False_Positive_Rate = FP / (FP + TN)
+    F1 = 2 * (Precision * Recall) / (Precision + Recall)
     ClassificationResultsTable.append(["Total Measures Analyzed", TestData.TotalNumMeasures])
     ClassificationResultsTable.append([f"{CadenceString} Detected:", f"{TP} out of {len(TotalTest)}"])
     ClassificationResultsTable.append(["TP", TP])
@@ -44,6 +45,7 @@ def compute_classification_scores():
     ClassificationResultsTable.append(["Accuracy", "{0:0.2f}".format(Accuracy)])
     ClassificationResultsTable.append(["Specificity", "{0:0.2f}".format(Specificity)])
     ClassificationResultsTable.append(["False Positive Rate", "{0:0.2f}".format(False_Positive_Rate)])
+    ClassificationResultsTable.append(["F1", "{0:0.2f}".format(F1)])
     print('========Classification Scores:==========')
     for row in ClassificationResultsTable:
         print(row)
@@ -54,18 +56,18 @@ def diachronic_sort(input_table):
         table_diachronically_sorted = sorted([[int(row[0].split(' ')[1].split('op')[1]),
                                                int(row[0].split(' ')[2].split('no')[1]),
                                                int(row[0].split(' ')[3].split('mv')[1].split('.')[0]),
-                                               row[1], row[2]] for row in input_table])
+                                               row[1], row[2], row[3]] for row in input_table])
         mov_str = [str(row[:3]) for row in table_diachronically_sorted]
     elif TestData == DCMData:
         table_diachronically_sorted = sorted([[int(row[0].split('-')[0].split('K')[1]),
                                                int(row[0].split('-')[1].split('.')[0]),
-                                               row[1], row[2]] for row in input_table])
+                                               row[1], row[2], row[3]] for row in input_table])
         mov_str = [str(row[:2]) for row in table_diachronically_sorted]
     elif TestData == ABCData:
         table_diachronically_sorted = sorted([[int(row[0].split(' ')[0].split('op')[1]),
                                                int(row[0].split(' ')[1].split('no')[1]),
                                                int(row[0].split(' ')[2].split('mov')[1].split('.')[0]),
-                                               row[1], row[2]] for row in input_table])
+                                               row[1], row[2], row[3]] for row in input_table])
         mov_str = [str(row[:3]) for row in table_diachronically_sorted]
     print('========Diachronically Sorted Table:==========')
     for row in table_diachronically_sorted:
@@ -73,12 +75,12 @@ def diachronic_sort(input_table):
     return mov_str, table_diachronically_sorted
 
 def plot_diachronic_analysis(mov_str, table_diachronically_sorted):
-    PAC_density_per_mov = [row[-1] * 100 for row in table_diachronically_sorted]
+    PAC_density_per_mov = [row[-2] * 100 for row in table_diachronically_sorted]
     x = range(len(PAC_density_per_mov))
     coef = np.polyfit(x, PAC_density_per_mov, 1)
     poly1d_fn = np.poly1d(coef)
     # poly1d_fn is now a function which takes in x and returns an estimate for y
-    fig, ax = plt.subplots(figsize=(20, 12))
+    _, ax = plt.subplots(figsize=(15, 8))
     ax.plot(PAC_density_per_mov)
     ax.plot(x, poly1d_fn(x), '--k')
     ax.locator_params(nbins=len(PAC_density_per_mov), axis='x')
@@ -90,9 +92,48 @@ def plot_diachronic_analysis(mov_str, table_diachronically_sorted):
     elif TestData == DCMData:
         plt.xlabel('K. Mv.', size=12)
     plt.ylabel('PAC Density %', size=12)
-    plt.title(f'PAC Density per Movement in {TestData.Label} Diachronically Sorted', size=14)
+    plt.title(f'{CadenceString} Density per Movement in {TestData.Label} Diachronically Sorted', size=14)
     plt.show(block=False)
-    plt.savefig(f'PAC Density Per Movement {TestData.Label}.png')
+    plt.savefig(f'{CadenceString} Density Per Movement {TestData.Label}.png')
+
+def plot_temporal_historgam(temporal_cadence_list):
+    _, ax = plt.subplots(figsize=(15, 8))
+    bins = np.arange(0, 1, 0.03)  # fixed bin size with resolution
+    counts, bins, _ = ax.hist(temporal_cadence_list, bins=bins, rwidth=0.8)
+    bin_centers = bins[:-1] + np.diff(bins) / 2
+    smooth_counts = np.convolve(counts, np.blackman(5), mode='same')
+    bins_high_res = np.arange(0, 1, 0.01)
+    smooth_counts = np.interp(bins_high_res, bin_centers, smooth_counts)
+    ax.plot(bins_high_res, smooth_counts, '--k')
+    plt.xlim([0,1])
+    plt.title(f'Temporal Position Distribution of {CadenceString}s in {TestData.Label}', size=14)
+    plt.xlabel('Time % in Movement', size=12)
+    plt.ylabel('Cadence Count', size=12)
+    plt.savefig(f'Temporal Position Distribution of {CadenceString}s {TestData.Label}.png')
+    plt.show(block=False)
+
+def plot_temporal_pos_per_mov(mov_str, table_diachronically_sorted):
+    temporal_perctanges = [row[-1] * 100 for row in table_diachronically_sorted]
+    _, ax = plt.subplots(figsize=(15, 8))
+    colors = plt.cm.tab20b(np.linspace(0, 1, 3))
+    for i, mov in enumerate(temporal_perctanges):
+        ax.scatter([i] * len(mov), mov, color=colors[i % 3], alpha=0.5)
+    leg=ax.legend(['mov 1', 'mov 2', 'mov 3'],loc=(1.02, 0.5))
+    for lh in leg.legendHandles:
+        lh.set_alpha(1)
+    x = range(len(temporal_perctanges))
+    ax.locator_params(nbins=len(temporal_perctanges), axis='x')
+    ax.xaxis.set_ticks(x)
+    ax.set_xticklabels(mov_str, rotation=45, size=8)
+    if TestData == SearsData or TestData == ABCData:
+        plt.xlabel('Op. No. Mv.', size=12)
+    elif TestData == DCMData:
+        plt.xlabel('K. Mv.', size=12)
+    plt.ylabel('Cadence Temporal Position %', size=12)
+    plt.title(f'{CadenceString} Temporal Positions in {TestData.Label} Diachronically Sorted', size=14)
+    plt.show()
+    plt.savefig(f'{CadenceString} Temporal Positions Per Movement {TestData.Label}.png')
+
 
 #=======Main script=========
 SearsData = LabeledData()
@@ -128,7 +169,7 @@ ABCData.Composer = "Beethoven"
 # ==================================
 # set which database to compare to
 # ==================================
-TestData = SearsData
+TestData = DCMData
 optimize_false_positives = False
 CadenceString = "PAC"
 
@@ -144,6 +185,7 @@ LabelsTable = []
 PredictionsTable = []
 TotalTest = []
 TotalStateMachine = []
+TotalStateMachineTemporalPercent = []
 TotalCommonPacs = []
 TotalFP = []
 TotalFN = []
@@ -167,6 +209,7 @@ for labelled_fp in sorted(full_list):
 
         CurrTestCadences = []
         CurrStateMachineCadences = []
+        CurrStateMachineCadencesTemporalPercent = []
         CurrFalsePositives = []
         CurrFalseNegatives = []
 
@@ -202,6 +245,8 @@ for labelled_fp in sorted(full_list):
                 elif CadenceString in line:
                     print(elements)
                     CurrStateMachineCadences.append(int(elements[StateMachineData.PACMeasureIndex]))
+            for cad_measure in CurrStateMachineCadences:
+                CurrStateMachineCadencesTemporalPercent.append(cad_measure/CurrNumMeasures)
             TestData.TotalNumMeasures = TestData.TotalNumMeasures + CurrNumMeasures
             PAC_density = len(CurrStateMachineCadences)/CurrNumMeasures
             print("PAC density: ", PAC_density)
@@ -213,6 +258,7 @@ for labelled_fp in sorted(full_list):
         # *set(l) removes duplicates from lists
         CurrTestCadences = sorted([*set(CurrTestCadences)])
         CurrStateMachineCadences = sorted([*set(CurrStateMachineCadences)])
+        CurrStateMachineCadencesTemporalPercent = sorted([*set(CurrStateMachineCadencesTemporalPercent)])
 
         for item in list(set(CurrTestCadences).intersection(set(CurrStateMachineCadences))):
             TotalCommonPacs.append(item)
@@ -225,6 +271,9 @@ for labelled_fp in sorted(full_list):
         for item in CurrStateMachineCadences:
             TotalStateMachine.append(item)
         TotalStateMachine = sorted(TotalStateMachine)
+
+        for item in CurrStateMachineCadencesTemporalPercent:
+            TotalStateMachineTemporalPercent.append(item)
 
         for item in list(set(CurrStateMachineCadences).symmetric_difference(set(CurrTestCadences))):
             if item in CurrStateMachineCadences:
@@ -249,7 +298,7 @@ for labelled_fp in sorted(full_list):
         CombinedTable.append([FileNameForText, CurrTestCadences, CurrStateMachineCadences])
         CombinedTableExtended.append([FileNameForText, CurrTestCadences, CurrStateMachineCadences, CurrFalsePositives, CurrFalseNegatives])
         LabelsTable.append([FileNameForText, CurrTestCadences])
-        PredictionsTable.append([FileNameForText, CurrStateMachineCadences, PAC_density])
+        PredictionsTable.append([FileNameForText, CurrStateMachineCadences, PAC_density, CurrStateMachineCadencesTemporalPercent])
 
 # writing to console
 table_to_console = copy.deepcopy(CombinedTableExtended) if TestData.PACMeasureIndex else copy.deepcopy(PredictionsTable)
@@ -258,7 +307,12 @@ for row in table_to_console:
     print(row)
 
 mv_str, diachronically_sorted_predictions = diachronic_sort(PredictionsTable)
+# plot PAC density diachronic
 plot_diachronic_analysis(mv_str, diachronically_sorted_predictions)
+# plot temporal distribution of cadences
+plot_temporal_historgam(TotalStateMachineTemporalPercent)
+# plot temporal position per move of cadences
+plot_temporal_pos_per_mov(mv_str, diachronically_sorted_predictions)
 
 # writing to latex
 now = datetime.now()
@@ -331,7 +385,7 @@ if TestData.PACMeasureIndex:
     full_path = os.path.join(path, file_to_open.replace(' ', '_'))
     full_path = full_path + '_' if not full_path[-1] == '_' else full_path
     full_path = full_path + 'xml_Analyzed.xml'
-    subprocess.call(('open', full_path))
+    #subprocess.call(('open', full_path))
 
 
 

@@ -4,9 +4,11 @@ import numpy as np
 import copy
 
 class CDStateMachine(object):
-    def __init__(self, isChallenger=False):
+    def __init__(self, isChallenger=False, minInitialMeasures=0, minPostCadenceMeasures=0):
         self.NumParts = 0
         self.MeasureCounter = 0 # measure counter is for the entire movement and not included in reset
+        self.MinInitialMeasures = minInitialMeasures
+        self.MinPostCadenceMeasures = minPostCadenceMeasures
         self.IsChallenger = isChallenger
         self.reset()
 
@@ -23,7 +25,7 @@ class CDStateMachine(object):
         self.FirstKeyDetectionDone = 0
         self.CadentialKeyChange = 0
         self.TriggerString = str("")
-        self.PostCadenceMeasureCounter = MinPostCadenceMeasures
+        self.PostCadenceMeasureCounter = self.MinPostCadenceMeasures
         self.CheckBassPartFromChord = False
         self.PACPending = False
         self.RevertLastPAC = False
@@ -368,9 +370,6 @@ class CDStateMachine(object):
         # ===============================================
         # ====idle state, wait for IV or II6 or I6=======
         # ===============================================
-        if (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio) and not (curr_state == CDCadentialStates.PACAppoggExpected or curr_state == CDCadentialStates.HCAppoggExpected):
-        #do nothing
-            curr_state = curr_state
         if curr_state == CDCadentialStates.Idle:
             if (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
                 # do nothing
@@ -410,9 +409,6 @@ class CDStateMachine(object):
             # only stay in CadAvoided once (currently for display purposes)
             if curr_state == CDCadentialStates.CadAvoided or curr_state == CDCadentialStates.IACArrival:
                 curr_state = CDCadentialStates.CadExpected
-
-            #verify chord has third to be dominant
-            #if self.harmonyHasThird() or self.isUnison():
             if self.CurrHarmonicState.ChordWithBassRests.isRest:
                 curr_state = curr_state
             #ignoring arppegios unless they contain dominant seventh chord
@@ -444,7 +440,7 @@ class CDStateMachine(object):
                     self.WeightOfLastCadence = self.tryGetBeatStrength()
                 else:
                     curr_state = curr_state
-            elif self.isSecondaryDominantLeadingTone():  # or (self.CurrHarmonicState.Key.mode=='major' and self.isSecondaryDominantUpperLeadingTone()): #this can create false HCs, need to consider non-cadential chromatic situations
+            elif self.isSecondaryDominantLeadingTone():
                 curr_state = CDCadentialStates.HCArrivalExpected
             elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
                 #if alberti and weak beat do nothing
@@ -484,7 +480,7 @@ class CDStateMachine(object):
                         elif self.tryGetBeatStrength() >= 0.5 and self.verifyPACGrouping(self.CurrHarmonicState):
                             # expecting appogiaturas only on strongest beats (TBD - this might be overfit to haydn)
                             curr_state = self.checkAppoggiatura(curr_state)
-                    # on strong beat: going from V to anything other than V or I is avoiding the cadence (TBD could HC follow?)
+                    # on strong beat: going from V to anything other than V or I is avoiding the cadence or bass appoggiatura
                     elif self.tryGetBeatStrength() >= 0.5 and self.verifyPACGrouping(self.CurrHarmonicState) and self.verifySopranoVoiceLeading(cadence_type='PAC'):
                         # expecting bass appogiaturas only on strongest beats
                         curr_state = self.checkBassAppoggiatura(curr_state)
@@ -637,7 +633,7 @@ class CDStateMachine(object):
 
         elif curr_state == CDCadentialStates.HCArrival:
             if self.CurrHarmonicState.ChordWithBassRests.isRest or self.PrevHarmonicState.ChordWithBassRests.isRest:# a rest confirms the cadence
-                curr_state = CDCadentialStates.Idle if MinPostCadenceMeasures > 0 else CDCadentialStates.CadInevitable
+                curr_state = CDCadentialStates.Idle if self.MinPostCadenceMeasures > 0 else CDCadentialStates.CadInevitable
             elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
                 # if alberti and weak beat do nothing
                 curr_state = curr_state
@@ -663,23 +659,6 @@ class CDStateMachine(object):
 
         #====set output to state and then set cadential arrivals back to idle state
         self.CurrCadentialOutput = curr_state
-        #=========================================
-        # ==========================================
-        # ========Post Cadence states===============
-        # ==========================================
-
-        # if curr_state == CDCadentialStates.PACArrival:
-        #     # == cadential arrival, currently go to idle immediately - TBD - look for post cadential stuff
-        #     curr_state = CDCadentialStates.Idle
-        #     self.PostCadenceMeasureCounter = 0
-        # elif curr_state == CDCadentialStates.PCCArrival:
-        #     # == post cadential arrival, currently go to idle immediately - TBD - look for post cadential stuff
-        #     curr_state = CDCadentialStates.Idle
-        #     self.PostCadenceMeasureCounter = 0
-        # elif curr_state == CDCadentialStates.HCArrival:
-        #     # == After HC we are still expecting a cadence, but we need to see how this does not create false positives
-        #     curr_state = CDCadentialStates.CadExpected
-
         self.CurrCadentialState = curr_state
         #print(self.CurrCadentialState)
         #==must check for change for flow debugging
@@ -714,27 +693,16 @@ class CDStateMachine(object):
         if self.PACPending:
             self.CurrCadentialState = CDCadentialStates.CadExpected
             self.RevertLastPAC = True
-            self.PostCadenceMeasureCounter = MinPostCadenceMeasures #set the counter high to catch the next cadence
+            self.PostCadenceMeasureCounter = self.MinPostCadenceMeasures #set the counter high to catch the next cadence
         else:
             # move to idle (confirming the PAC) and call update state again
-            if MinPostCadenceMeasures > 0:
+            if self.MinPostCadenceMeasures > 0:
                 self.CurrCadentialState = CDCadentialStates.Idle
-                # self.PostCadenceMeasureCounter = 0
             # if no minimum post cadence measures required, expect post cadential cadences
             else:
                 self.CurrCadentialState = CDCadentialStates.CadExpected
             self.RevertLastPAC = False
         self.PACPending = False
-
-    def exitHCState(self): # obsolete - TBD use this?
-        if self.HCPending:
-            self.CurrCadentialState = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival)
-            self.RevertLastHC = True
-        else:
-            # move to CadExpected (confirming the HC) and call update state again
-            self.CurrCadentialState = CDCadentialStates.CadExpected
-            self.RevertLastHC = False
-        self.HCPending = False
 
     def updateCounters(self):
         #beat strenth==1 means new measure
@@ -743,9 +711,9 @@ class CDStateMachine(object):
             self.MeasureCounter = self.MeasureCounter + 1
 
     def setCadenceOrPostCadence(self,Cadence):
-        if Cadence==CDCadentialStates.PACArrival and self.PostCadenceMeasureCounter < MinPostCadenceMeasures:
+        if Cadence==CDCadentialStates.PACArrival and self.PostCadenceMeasureCounter < self.MinPostCadenceMeasures:
             state = CDCadentialStates.PCCArrival
-        elif self.MeasureCounter <= MinInitialMeasures:
+        elif self.MeasureCounter <= self.MinInitialMeasures:
             state = CDCadentialStates.IACArrival
         else:
             state = Cadence
@@ -759,11 +727,6 @@ class CDStateMachine(object):
     def getCadentialOutputString(self):
         Lyric = str("")
         if self.ChangeFlagOneShot == 1:
-
-            #returning to idle should not require a chord display
-            #if not (self.getCadentialOutput() == CDCadentialStates.Idle):
-                #Lyric = Lyric + str(self.CurrHarmonicState.ChordFigure)
-
             if self.getCadentialOutput() == CDCadentialStates.PACArrival:
                 Lyric = str("PAC")
             elif self.getCadentialOutput() == CDCadentialStates.PCCArrival:
@@ -776,7 +739,6 @@ class CDStateMachine(object):
                 Lyric = str("CA")
             elif not (self.getCadentialOutput() == CDCadentialStates.Idle):
                 Lyric = Lyric + self.TriggerString
-
 
         if self.KeyChangeOneShot == 1 or self.FirstKeyDetectionDone == 0 or self.CadentialKeyChange == 1:
             Lyric = Lyric + str("\nKey: ") + str(self.CurrHarmonicState.Key)

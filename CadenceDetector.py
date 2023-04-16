@@ -1,18 +1,32 @@
 from CadenceDetectStateMachine import *
 import music21 as m21
-from collections import Counter
 import math
 import os
-import numpy
 import pickle
 import enum
 import copy
 import sys
 
 class CadenceDetector:
-    def __init__(self):
-        self.HarmonicStateMachine = CDStateMachine(isChallenger=False)
-        self.HarmonicStateMachineChallenger = CDStateMachine(isChallenger=True)
+    def __init__(self,
+                 maxNumMeasures=500,
+                 minInitialMeasures=0,
+                 minPostCadenceMeasures=0,
+                 keyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive,
+                 keyDetectionForgetFactor = 0.8,
+                 reenforcementFactors = {'PAC': 3, 'IAC': 1, 'HC': 3/2},
+                 keyDetectionLookahead = 0.5,
+                 keyDetectionBlockSize=4,
+                 keyDetectionOverlap=0.25):
+        self.MaxNumMeasures = maxNumMeasures
+        self.KeyDetectionMode = keyDetectionMode
+        self.KeyDetectionForgetFactor = keyDetectionForgetFactor
+        self.ReenforcementFactors = reenforcementFactors
+        self.key_detection_lookahead = keyDetectionLookahead
+        self.blockSize = keyDetectionBlockSize
+        self.overlap = keyDetectionOverlap
+        self.HarmonicStateMachine = CDStateMachine(isChallenger=False, minInitialMeasures=minInitialMeasures, minPostCadenceMeasures=minPostCadenceMeasures)
+        self.HarmonicStateMachineChallenger = CDStateMachine(isChallenger=True, minInitialMeasures=minInitialMeasures, minPostCadenceMeasures=minPostCadenceMeasures)
         self.NoteStream = []
         self.NoteStreamRestless = []
         self.NoteStreamReduced = []
@@ -35,18 +49,12 @@ class CadenceDetector:
         self.Parts = []
         self.MeasuresPerPart = []
         self.NumMeasures = 0
-        self.blockSize = 0
-        self.overlap = 0
-        self.key_detection_lookahead = 0
         self.fileName = 0
         self.hasPickupMeasure = 0
         self.WritePath = 0
-        self.KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothing
-        self.KeyDetectionForgetFactor = 0.9
         self.RepeatedMeasureByVolta = []
         self.IncompleteMeasures = []
         self.EmptyMeasures = []
-        self.ReenforcementFactors = []
         self.FinalBarlines = []
         self.analysis_full = []
         self.analysis_filtered = []
@@ -64,7 +72,7 @@ class CadenceDetector:
         for part in self.Parts:
             self.MeasuresPerPart.append(part.recurse().getElementsByClass(m21.stream.Measure))
         self.NumMeasures = max([len(curr_part_measures) for curr_part_measures in self.MeasuresPerPart])
-        self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
+        self.NumMeasures = min(self.NumMeasures, self.MaxNumMeasures)
         #update some data to state machines
         self.HarmonicStateMachine.NumParts = self.NumParts
         self.HarmonicStateMachineChallenger.NumParts = self.NumParts
@@ -92,7 +100,7 @@ class CadenceDetector:
 
 
         self.NumMeasures = len(self.ChordStream.recurse().getElementsByClass(m21.stream.Measure))
-        self.NumMeasures = min(self.NumMeasures, MaxNumMeasures)
+        self.NumMeasures = min(self.NumMeasures, self.MaxNumMeasures)
         self.findVoltas()
         self.findFinalBarlines()
         self.findEmptyMeasures()
@@ -115,40 +123,6 @@ class CadenceDetector:
             self.BassChords = BassPartNoGrace.chordify(removeRedundantPitches=False, copyPitches=False)
 
         self.findGroupLimitsViaSecondsMap()
-
-    def findGroupLimits(self):
-        for part in self.Parts:
-            prev_note = []
-            prev_diff = []
-            prev_measure = []
-            for curr_measure in part.recurse().getElementsByClass(m21.stream.Measure):
-                first_note_in_measure = True
-                for curr_note in curr_measure.recurse().getElementsByClass(m21.note.Note):
-                    if curr_note.tie and not curr_note.tie == m21.tie.Tie('start'):
-                        continue
-                    if prev_note:
-                        curr_diff = curr_note.offset - prev_note.offset
-                        if first_note_in_measure and prev_measure: # first note but not first measure, complete previous measure
-                            curr_diff += prev_measure.duration.quarterLength
-                        if prev_diff:
-                            # long note groups backward with previous shorter notes, adding epsilon becuase they may be different due to fraction inaccuracy
-                            # also close grouping on very long notes (longer than a measure)
-                            epsilon = 0.001
-                            if (curr_diff > prev_diff + epsilon) or curr_diff >= curr_measure.duration.quarterLength:
-                                prev_note.groups.append('}')
-                                curr_note.groups.append('{')
-                        prev_diff = curr_diff
-                    else: # first note of work
-                        curr_note.groups.append('{')
-                    prev_note = curr_note
-                    first_note_in_measure = False
-                prev_measure = curr_measure
-            # always mark last note in part
-            if prev_note:
-                prev_note.groups.append('}')
-            # add grouping lyrics for debug
-            for note in part.recurse().getElementsByClass(m21.note.Note):
-                note.lyric = ' '.join(note.groups)
 
     def findGroupLimitsViaSecondsMap(self):
         for part in self.Parts:
@@ -316,42 +290,6 @@ class CadenceDetector:
         if not chords_present:
              print('No more chords in note stream!')
 
-
-    def replaceBassRestsWithPrevs(self):
-        parts = self.NoteStreamRestless.recurse().getElementsByClass(m21.stream.Part)
-        self.NumParts = len(parts)
-        p=0
-        for curr_part in parts:
-            if not p==self.NumParts-1:#bass only, assuming bass is last part
-                p=p+1
-                continue
-            prev_note = []
-            measure_modifcations_list = []
-            for i,curr_measure in enumerate(curr_part.recurse().getElementsByClass(m21.stream.Measure)):
-                if i==55:
-                    bla = 0
-                if len(measure_modifcations_list) > 0: # only complete one measure forward
-                    prev_note = []
-                measure_modifcations_list = []
-                #find rest and create modifications
-                for curr_item in curr_measure.recurse().getElementsByClass(m21.note.GeneralNote):
-                    if prev_note:
-                        if curr_item.isRest:
-                            if prev_note.isChord:
-                                note_from_rest = self.noteFromRestWithPitch(curr_item, prev_note.pitches[0])
-                            else:
-                                note_from_rest = self.noteFromRestWithPitch(curr_item, prev_note.pitch)
-                            measure_modifcations_list.append([curr_item, note_from_rest])
-                        else:
-                            prev_note = curr_item
-                    elif not curr_item.isRest:
-                        prev_note = curr_item
-                #make modifications to measure
-                for curr_mod in measure_modifcations_list:
-                    curr_measure.replace(curr_mod[0], curr_mod[1])
-
-        #self.NoteStreamRestless.show()
-
     def replaceBassRestsWithPrevsViaSecondsMaps(self):
         max_consec_empty_meas = 1
         prev_note = []
@@ -452,125 +390,8 @@ class CadenceDetector:
     def getNumMeasures(self):
         return self.NumMeasures
 
-    def detectKeyPerMeasure(self,blockSize,overlap):
+    def detectKeyPerMeasure(self):
         print("Detecting key per block...")
-        self.blockSize = blockSize
-        self.overlap = overlap
-        stepSize = math.ceil(self.blockSize * self.overlap)
-        print("Num Measures:",self.NumMeasures)
-        CorrCoefs =[]
-        for currBlock in range(1,self.NumMeasures+stepSize-1,stepSize):
-            StopMeasure = min(currBlock + self.blockSize - 1,self.NumMeasures)
-            if StopMeasure<currBlock:
-                break
-            CurrMeasures = self.NoteStream.measures(currBlock, StopMeasure)
-            #print(currBlock, StopMeasure)
-            Key = CurrMeasures.analyze('key')
-            AllInterpretations = Key.alternateInterpretations.append(Key)
-            #print(Key)
-            #print(Key.correlationCoefficient)
-            CorrCoefs.append(Key.correlationCoefficient)
-            iMeasure = currBlock-1
-            for thisMeasure in CurrMeasures:
-                #adding the keys as a multiple of the correlation coef to get more accurate statistics
-                for nCounts in range(1, math.ceil(Key.correlationCoefficient*10)):
-                    if iMeasure >= len(self.OptionalKeysPerMeasure):
-                        self.OptionalKeysPerMeasure.append([Key])#if this is the first key anlaysis realted to this measure, append it as new list
-                    else:
-                        self.OptionalKeysPerMeasure[iMeasure].append(Key)#otherwise append it to existing list
-                iMeasure = iMeasure + 1
-
-            #write this Key for entire block - Fix for overlapping
-            # for thisChord in CurrMeasures.recurse().getElementsByClass('Chord'):
-            #     thisChord.extend(Key)
-
-        print("Mean CorrCoef: ",numpy.mean(CorrCoefs))
-        #loop thru optional keys per measure and determine key by highset distribution
-
-        for currMeasure in range(0, self.NumMeasures):
-            currOptionalKeys = self.OptionalKeysPerMeasure[currMeasure]
-            key_counts = Counter(currOptionalKeys)
-            mostCommonKey = key_counts.most_common(1)[0][0]
-            self.KeyPerMeasure.append(mostCommonKey)
-            ####====debug with constant key
-            #self.KeyPerMeasure.append(key.Key('D'))#akjshdgakdshg  - temp debug set constant key
-
-    def detectKeyPerMeasure2(self, blockSize,tc):
-        print("Num Measures:", self.NumMeasures)
-        self.blockSize = blockSize
-        ka = m21.analysis.floatingKey.KeyAnalyzer(self.NoteStream)
-        ka.windowSize = self.blockSize
-        ka.run()
-        my_smoothed_interp = []
-        for m in range(1, ka.numMeasures):
-            if m == 1:
-                curr_smooth = ka.getInterpretationByMeasure(m)
-            else:
-                curr_smooth = {}
-                curr_interpretation = ka.getInterpretationByMeasure(m)
-                prev_smooth = my_smoothed_interp[m-2]  # measures start from 1, indices start from zero, hence the -2
-                # smoothing per key
-                for curr_key in curr_interpretation.keys():
-                    curr_smooth[curr_key] = tc * prev_smooth[curr_key] + (1-tc) * curr_interpretation[curr_key]
-            my_smoothed_interp.append(curr_smooth)
-            # finding maximum per measure after smoothing
-            max_key = max(curr_smooth, key=curr_smooth.get)
-            self.KeyPerMeasure.append(key.Key(max_key))
-
-        # this is to overcome the last measure problem in music21
-        self.KeyPerMeasure.append(self.KeyPerMeasure[-1])
-
-    def detectKeyPerMeasure3(self, blockSize, overlap):
-        print("Detecting key per block...")
-        self.blockSize = blockSize
-        self.overlap = overlap
-        print("Num Measures:", self.NumMeasures)
-        smoothed_corr_coefs = {}
-        for currBlock in range(1, self.NumMeasures+1):
-            StopMeasure = min(currBlock + self.blockSize - 1, self.NumMeasures)
-            CurrMeasures = self.NoteStream.measures(currBlock, StopMeasure)
-            #print(currBlock, StopMeasure)
-            try:
-                Key = CurrMeasures.analyze('key')
-                Key.alternateInterpretations.append(Key)
-                max_val = 0
-                for curr_key in Key.alternateInterpretations:
-                    short_name = curr_key.tonicPitchNameWithCase
-                    if short_name not in smoothed_corr_coefs:  # no smoothing on first measure
-                        smoothed_val = curr_key.correlationCoefficient
-                    else:  # append with smoothing
-                        smoothed_val = self.KeyDetectionForgetFactor * smoothed_corr_coefs[short_name] + (1-self.KeyDetectionForgetFactor) * curr_key.correlationCoefficient
-                    smoothed_corr_coefs[short_name] = smoothed_val
-                    if smoothed_val > max_val:
-                        max_val = smoothed_val
-                        max_key = curr_key
-            except:
-                print("Key detection error:", sys.exc_info()[0])
-                print("Maintaining previous key")
-                max_key = self.KeyPerMeasure[-1]
-
-            self.KeyPerMeasure.append(max_key)
-            self.InterpretationsPerMeasure.append(Key.alternateInterpretations)
-            self.SmoothedCorrCoefsPerMeasure.append(dict(smoothed_corr_coefs))
-
-            #sort keys by values and return top 2
-            #Top2 = dict(sorted(smoothed_corr_coefs.items(), key=lambda item: item[1] , reverse = True)[:2])
-            #Top2Keys = list(Top2.keys())
-            #self.KeyPerMeasure.append(Top2Keys[0])
-            #self.KeyPerMeasure2.append(Top2Keys[1])
-
-
-        # left shift everything by N measures, for per key change cadences - TBD, shift key using cadence detection
-        n_shift = 0
-        for i in range(0, len(self.KeyPerMeasure)-n_shift):
-            self.KeyPerMeasure[i] = self.KeyPerMeasure[i+n_shift]
-
-        #print(currBlock, max_key)
-
-    def detectKeyPerMeasure4(self, blockSize, overlap):
-        print("Detecting key per block...")
-        self.blockSize = blockSize
-        self.overlap = overlap
         print("Num Measures:", self.NumMeasures)
         for currBlock in range(1, self.NumMeasures+1):
             # this only looks at current bar and backwards, simulating realtime
@@ -599,34 +420,35 @@ class CadenceDetector:
 
             self.InterpretationsPerMeasure.append(CurrInterpretations)
 
-
-    def detectKeyPerMeasureWrapper(self, blockSize, overlap):
-        if self.KeyDetectionMode == CDKeyDetectionModes.KSRaw:
-            self.detectKeyPerMeasure(blockSize, overlap)
-        #elif self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
-        #    self.detectKeyPerMeasure3(blockSize, overlap)
-        elif self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
-            self.detectKeyPerMeasure4(blockSize, overlap)
+    def setConstantKeyPerMeasure(self, key_string):
+        const_key = m21.key.Key(key_string)
+        const_key.correlationCoefficient = 1.0
+        dummy_key_string = 'C' if key_string != 'C' else 'A'
+        dummy_key = m21.key.Key(dummy_key_string)
+        dummy_key.correlationCoefficient = 0.0
+        const_key_list = [const_key, dummy_key]
+        for m in range(1, self.NumMeasures + 1):
+            self.InterpretationsPerMeasure.append(const_key_list)
 
     def reenforceKeyByFactor(self, keyString, enhancement):
         enhancedCoef = math.pow(self.CurrSmoothedInterpretations[keyString], 1/enhancement)
         self.CurrSmoothedInterpretations[keyString] = enhancedCoef
 
-    def writeKeyPerMeasureToFile(self, KeyDetectionMode):
-        if KeyDetectionMode != CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+    def writeKeyPerMeasureToFile(self):
+        if self.KeyDetectionMode != CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
             print("Writing keys to file...")
             keyfileName = self.fileName.replace(".", "_")
             FullPath = os.path.join(self.WritePath, keyfileName)
-            KeyFile = f"{FullPath}_Key_{KeyDetectionMode}.txt"
+            KeyFile = f"{FullPath}_Key_{self.KeyDetectionMode}.txt"
             with open(KeyFile, 'wb') as f:
                 pickle.dump(self.KeyPerMeasure, f)
 
-    def readKeyPerMeasureFromFile(self, KeyDetectionMode):
-        if KeyDetectionMode != CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
+    def readKeyPerMeasureFromFile(self):
+        if self.KeyDetectionMode != CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
             print("Reading keys from file...")
             keyfileName = self.fileName.replace(".", "_")
             FullPath = os.path.join(self.WritePath, keyfileName)
-            KeyFile = f"{FullPath}_Key_{KeyDetectionMode}.txt"
+            KeyFile = f"{FullPath}_Key_{self.KeyDetectionMode}.txt"
             with open(KeyFile, 'rb') as f:
                 self.KeyPerMeasure=pickle.load(f)
 
@@ -716,13 +538,21 @@ class CadenceDetector:
         return retVal
 
     def isAlbertiPattern(self, pitches, lengths, pattern_len):
-        retVal = all(lengths[0] == l for l in lengths[1:4])
-        retVal = retVal and all(x.midi >= pitches[0].midi for x in pitches[1:4]) and (pitches[1].midi == pitches[3].midi or pitches[0].midi == pitches[2].midi)
+        equal_durations = all(lengths[0] == l for l in lengths[1:4])
+        lowest_pitch_first = all(x.midi >= pitches[0].midi for x in pitches[1:4])
+        lowest_pitch_third = all(x.midi >= pitches[2].midi for x in pitches[1:4])
+        repetitve_pitch = (pitches[1].midi == pitches[3].midi or pitches[0].midi == pitches[2].midi)
         # for pattern length 6 (3/4,3/8,6/8) verify last two as well, either continuing the same pattern or repeating the bass
         if pattern_len == 6:
-            retVal = all(lengths[0] == l for l in lengths)
-            retVal = retVal and (pitches[3].midi == pitches[5].midi or pitches[0] == pitches[4])
-        return retVal
+            equal_durations = all(lengths[0] == l for l in lengths)
+            repetitve_pitch = repetitve_pitch and (pitches[3].midi == pitches[5].midi or pitches[0] == pitches[4])           
+        is_alberti = equal_durations and repetitve_pitch and (lowest_pitch_first or lowest_pitch_third)
+        bass_pitch_index = None
+        if lowest_pitch_first:
+            bass_pitch_index = 0
+        elif lowest_pitch_third:
+            bass_pitch_index = 2
+        return is_alberti, bass_pitch_index
 
     def extractBassLine(self, measure):
         lowestPitches = []
@@ -749,17 +579,27 @@ class CadenceDetector:
                 curr_lengths = lowest_pitches_in_bass['lengths'][i:i+pattern_len]
                 if None not in curr_pitches:
                     if arp_type == 'alberti':
-                        isArp = self.isAlbertiPattern(pitches=curr_pitches, lengths=curr_lengths, pattern_len=pattern_len)
+                        isArp, bass_pitch_index = self.isAlbertiPattern(pitches=curr_pitches, lengths=curr_lengths, pattern_len=pattern_len)
                     elif arp_type == 'arp_up':
                         isArp = self.isArpeggioPattern(pitches=curr_pitches, lengths=curr_lengths, arp_len=pattern_len, up_down='up')
+                        bass_pitch_index = 0
                     elif arp_type =='arp_down':
                         isArp = self.isArpeggioPattern(pitches=curr_pitches, lengths=curr_lengths, arp_len=pattern_len, up_down='down')
+                        bass_pitch_index = 0
                     else:
                         isArp = False
                     if isArp:
                         epsilon = 0.1  # this epsilon is required to mark the last alberti beat including its length, but not the next beat
-                        arp_patterns.append({'start': bass_general_notes[i + 1].beat,
-                                             'stop': bass_general_notes[i + pattern_len - 1].beat + bass_general_notes[i + pattern_len - 1].duration.quarterLength - epsilon})
+                        if bass_pitch_index == 0:
+                            arp_patterns.append({'start': bass_general_notes[i + 1].beat,
+                                                 'stop': bass_general_notes[i + pattern_len - 1].beat + bass_general_notes[i + pattern_len - 1].duration.quarterLength - epsilon})
+                        else:
+                            # mark from beginning of pattern not including first note, to bass pitch index not included
+                            arp_patterns.append({'start': bass_general_notes[i + 1].beat,
+                                                 'stop': bass_general_notes[i + bass_pitch_index - 1].beat + bass_general_notes[i + bass_pitch_index - 1].duration.quarterLength - epsilon})
+                            # mark from note after bass pitch index to the end
+                            arp_patterns.append({'start': bass_general_notes[i + bass_pitch_index + 1].beat,
+                                                 'stop': bass_general_notes[i + pattern_len - 1].beat + bass_general_notes[i + pattern_len - 1].duration.quarterLength - epsilon})
 
         arp_beats = [0] * len(measure_general_notes)
         for i,gen_note in enumerate(measure_general_notes):
@@ -780,6 +620,9 @@ class CadenceDetector:
             currSmoothedVal = self.CurrSmoothedInterpretations[keyString]
             currSmoothedVal = self.KeyDetectionForgetFactor * currSmoothedVal + (1-self.KeyDetectionForgetFactor) * corrCoef
             self.CurrSmoothedInterpretations[keyString] = currSmoothedVal
+
+    def resetSmoothedInterpretations(self):
+        self.CurrSmoothedInterpretations = {}
 
     def getTopNKeyInterpretations(self, N):
         #now sort by value
@@ -816,7 +659,7 @@ class CadenceDetector:
         try:
             for currMeasureIndex in range(0,self.NumMeasures):
                 # debug per measure
-                if currMeasureIndex == 80:
+                if currMeasureIndex == 20:
                     bla = 0
                 # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
                 # for example, data that originates from midi cannot contain this info
@@ -836,6 +679,7 @@ class CadenceDetector:
                 if currMeasureIndex > 0 and self.FinalBarlines[currMeasureIndex-1] and not (self.HarmonicStateMachine.getCadentialOutput() == CDCadentialStates.CadInevitable):
                     self.HarmonicStateMachine.reset()
                     self.HarmonicStateMachineChallenger.reset()
+                    self.resetSmoothedInterpretations()
 
                 if self.EmptyMeasures[currMeasureIndex]:
                     empty_measure_counter = empty_measure_counter + 1
@@ -1038,14 +882,37 @@ class CadenceDetector:
                     for part in PrevParts:
                         for thisNote in part.flat.notesAndRests:
                             thisNote.lyric = thisNote.lyric.replace('HC', '')
+                # PAC and PCC cancels HC in same measure
+                if 'HC' in CurrMeasuresLyrics and ('PAC' in CurrMeasuresLyrics or 'PCC' in CurrMeasuresLyrics):
+                    print(f'Filtering HC in measure {measure_number}')
+                    for part in CurrParts:
+                        for thisNote in part.flat.notesAndRests:
+                            thisNote.lyric = thisNote.lyric.replace('HC', '')
                 # HC cancels previous IAC
                 if 'IAC' in PrevMeasureLyrics and 'HC' in CurrMeasuresLyrics:
                     print(f'Filtering IAC in measure {measure_number - 1}')
                     for part in PrevParts:
                         for thisNote in part.flat.notesAndRests:
                             thisNote.lyric = thisNote.lyric.replace('IAC', '')
+                # HC cancels current IAC
+                if 'HC' in CurrMeasuresLyrics and 'IAC' in CurrMeasuresLyrics:
+                    print(f'Filtering IAC in measure {measure_number}')
+                    for part in CurrParts:
+                        for thisNote in part.flat.notesAndRests:
+                            thisNote.lyric = thisNote.lyric.replace('IAC', '')
+                # HC cancels forward IAC
+                if 'HC' in PrevMeasureLyrics and 'IAC' in CurrMeasuresLyrics:
+                    print(f'Filtering IAC in measure {measure_number}')
+                    for part in CurrParts:
+                        for thisNote in part.flat.notesAndRests:
+                            thisNote.lyric = thisNote.lyric.replace('IAC', '')
                 # PAC cancels forward HC
                 if 'PAC' in PrevMeasureLyrics and 'HC' in CurrMeasuresLyrics:
+                    print(f'Filtering HC in measure {measure_number}')
+                    for part in CurrParts:
+                        for thisNote in part.flat.notesAndRests:
+                            thisNote.lyric = thisNote.lyric.replace('HC', '')
+                if 'PAC' in CurrMeasuresLyrics and 'HC' in CurrMeasuresLyrics:
                     print(f'Filtering HC in measure {measure_number}')
                     for part in CurrParts:
                         for thisNote in part.flat.notesAndRests:
@@ -1063,15 +930,19 @@ class CadenceDetector:
             curr_cad = item
             if prev_cad:
                 if curr_cad['Measure'] - prev_cad['Measure'] <= 1:
-                    # PAC, HC and PCC cancels HC
-                    if prev_cad['Lyric'] == 'HC' and curr_cad['Lyric'] != 'IAC':
+                    # PAC, HC or PCC cancel previous HC
+                    if prev_cad['Lyric'] == 'HC' and curr_cad['Lyric'] in ['PAC', 'HC', 'PCC']:
                         print(f"Filtering HC in measure {prev_cad['Measure']}")
                         if prev_cad not in items_to_remove: items_to_remove.append(prev_cad)
-                    # HC cancels IAC
+                    # HC cancels IAC backward
                     if prev_cad['Lyric'] == 'IAC' and curr_cad['Lyric'] == 'HC':
                         print(f"Filtering IAC in measure {prev_cad['Measure']}")
                         if prev_cad not in items_to_remove: items_to_remove.append(prev_cad)
-                    # PAC cancels HC forwards
+                    # HC cancels IAC forward
+                    if prev_cad['Lyric'] == 'HC' and curr_cad['Lyric'] == 'IAC':
+                        print(f"Filtering IAC in measure {curr_cad['Measure']}")
+                        if curr_cad not in items_to_remove: items_to_remove.append(curr_cad)
+                    # PAC cancels HC forward
                     if prev_cad['Lyric'] == 'PAC' and curr_cad['Lyric'] == 'HC':
                         print(f"Filtering HC in measure {curr_cad['Measure']}")
                         if curr_cad not in items_to_remove: items_to_remove.append(curr_cad)

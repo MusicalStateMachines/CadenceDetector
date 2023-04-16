@@ -1,11 +1,4 @@
-from music21 import *
 from enum import Enum
-
-#consts
-MaxNumMeasures = 500
-MinInitialMeasures = 2
-MinPostCadenceMeasures = 2
-
 
 class CDCadentialStates(Enum):
     Idle = 1

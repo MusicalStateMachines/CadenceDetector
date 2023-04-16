@@ -1,26 +1,28 @@
 from CadenceDetector import *
-from music21 import *
 import tqdm
 from functools import partial
+import os
+import time
+import multiprocessing as mp
+
 DownloadsPath = '/Users/matanba/Downloads/'
 SearsHaydnPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 DCMLabMozartPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml'
 DCMBeethovenPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data/mxl'
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
-#SearsPath = '/Users/matanba/Dropbox/PhD/AlignMidi/alignmidi/'
 # all files
 XMLFileEnding = ".xml"
 # haydn singe file
-# XMLFileEnding = "op055_no03_mv01.xml"
+# XMLFileEnding = "op033_no02_mv01.xml"
 # mozart single file
-# XMLFileEnding = "333-2.xml"
+#XMLFileEnding = "284-3.xml"
 # beethoven single file
 # XMLFileEnding = "op130_no13_mov6.mxl"
 # multi-core processing
 DoParallelProcessing = XMLFileEnding in ['.xml', '.mxl']
 
 # select analysis path
-InputFilePath = SearsHaydnPath
+InputFilePath = DCMLabMozartPath
 OutputFilePath = MyPath
 
 #===for testing a single file not in database
@@ -35,12 +37,16 @@ TextFileEnding = ".txt"
 # Global Settings
 ReadKeyFromSears = 0
 RunKeyDetection = 1
+SetConstantKey = 'a'
 RunCadenceDetection = 1
 OnlyGetNumMeasures = False
-# Tunable Parameters
+# Cadence Detector Tunable Parameters
+MaxNumMeasures = 500
+MinInitialMeasures = 0
+MinPostCadenceMeasuresDict = {SearsHaydnPath: 2, DCMLabMozartPath: 0, DCMBeethovenPath: 0}
+MinPostCadenceMeasures = MinPostCadenceMeasuresDict[InputFilePath]
 KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
-KeyDetectionBlockSizes = {SearsHaydnPath: 4, DCMLabMozartPath: 4, DCMBeethovenPath: 4} # in measures
-KeyDetectionBlockSize = KeyDetectionBlockSizes[InputFilePath]
+KeyDetectionBlockSize = 4 # in measures
 KeyDetectionOverlap = 1 / KeyDetectionBlockSize  # ratio from block size, this creates an step size of 1 measure
 KeyDetectionLookAhead = 0.5 # percentage from block size
 KeyDetectionForgetFactor = 0.8
@@ -49,9 +55,6 @@ ReenforcementFactorsDict = {SearsHaydnPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2},
                             DCMBeethovenPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2}}
 ReenforcementFactors = ReenforcementFactorsDict[InputFilePath]
 
-import os
-import time
-import multiprocessing as mp
 
 def findCadencesInFile(file, only_get_num_measures = False):
     try:
@@ -60,11 +63,15 @@ def findCadencesInFile(file, only_get_num_measures = False):
             FullPath = os.path.join(InputFilePath, file)
             print(f"Analyzing {FullPath}")
             # init detector class
-            CD = CadenceDetector()
-            CD.KeyDetectionMode = KeyDetectionMode
-            CD.KeyDetectionForgetFactor = KeyDetectionForgetFactor
-            CD.ReenforcementFactors = ReenforcementFactors
-            CD.key_detection_lookahead = KeyDetectionLookAhead
+            CD = CadenceDetector(maxNumMeasures=MaxNumMeasures,
+                                 minInitialMeasures=MinInitialMeasures,
+                                 minPostCadenceMeasures=MinPostCadenceMeasures,
+                                 keyDetectionMode=KeyDetectionMode,
+                                 keyDetectionLookahead=KeyDetectionLookAhead,
+                                 keyDetectionForgetFactor=KeyDetectionForgetFactor,
+                                 reenforcementFactors=ReenforcementFactors,
+                                 keyDetectionBlockSize=KeyDetectionBlockSize,
+                                 keyDetectionOverlap=KeyDetectionOverlap)
             if only_get_num_measures:
                 CD.loadFileAndGetMeasures(FullPath)
             else:
@@ -76,14 +83,15 @@ def findCadencesInFile(file, only_get_num_measures = False):
                 # detect key per measure
                 if ReadKeyFromSears:
                     CD.getKeyPerMeasureFromSearsFile(FullPath)
-                    CD.writeKeyPerMeasureToFile(KeyDetectionMode)
+                    CD.writeKeyPerMeasureToFile()
                 elif RunKeyDetection:
-                    CD.detectKeyPerMeasureWrapper(KeyDetectionBlockSize, KeyDetectionOverlap)
-                    # write To file
-                    CD.writeKeyPerMeasureToFile(KeyDetectionMode)
+                    CD.detectKeyPerMeasure()
+                    CD.writeKeyPerMeasureToFile()
+                else:
+                    CD.setConstantKeyPerMeasure(SetConstantKey)
                 if RunCadenceDetection:
                     # read from file
-                    CD.readKeyPerMeasureFromFile(KeyDetectionMode)
+                    CD.readKeyPerMeasureFromFile()
                     # detect cadences per key
                     CD.detectCadences()
                     try:
