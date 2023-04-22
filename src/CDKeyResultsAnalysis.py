@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 import pickle
-from CadenceDetectData import *
+from src.cadence_detector.CadenceDetectData import *
 
 # set paths
 DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'

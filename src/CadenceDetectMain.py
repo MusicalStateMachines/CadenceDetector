@@ -1,4 +1,4 @@
-from CadenceDetector import *
+from src.cadence_detector.CadenceDetector import *
 import tqdm
 from functools import partial
 import os
@@ -13,7 +13,7 @@ MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
 # all files
 XMLFileEnding = ".xml"
 # haydn singe file
-# XMLFileEnding = "op033_no02_mv01.xml"
+XMLFileEnding = "op033_no02_mv01.xml"
 # mozart single file
 #XMLFileEnding = "284-3.xml"
 # beethoven single file
@@ -22,7 +22,7 @@ XMLFileEnding = ".xml"
 DoParallelProcessing = XMLFileEnding in ['.xml', '.mxl']
 
 # select analysis path
-InputFilePath = DCMLabMozartPath
+InputFilePath = SearsHaydnPath
 OutputFilePath = MyPath
 
 #===for testing a single file not in database

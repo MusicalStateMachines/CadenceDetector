@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "cadence_detector"
+version = "0.0.17"
+authors = [
+  { name="Matan Ben-Asher", email="mbenasher@yahoo.com" },
+]
+description = "A python package for cadence detection"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+#dependencies = [
+#    "music21",
+#    "numpy",
+#    "pandas",
+#    "tqdm",
+#]
+[project.urls]
+"Homepage" = "https://github.com/MusicalStateMachines/CadenceDetector"
+"Bug Tracker" = "https://github.com/MusicalStateMachines/CadenceDetector/issues"

@@ -1,4 +1,4 @@
-from CadenceDetectStateMachine import *
+from .CadenceDetectStateMachine import *
 import music21 as m21
 import math
 import os
