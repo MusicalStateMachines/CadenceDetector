@@ -1,5 +1,5 @@
-# cadece_detector
-A python package for cadence detection on music xml score. 
+# cadence_detector
+A python package for cadence detection on music xml scores. 
 The scan returns files with measure and offset locations of PACs, IACs, and HCs, as well as a musicxml file with cadence labels on the score.
 # Installation 
 pip install cadence_detector
