@@ -382,7 +382,7 @@ class CDStateMachine(object):
         return self.verifyGrouping(HarmonicState=HarmonicState, start_stop='stop')
 
     def verifyHCGrouping(self, HarmonicState, start_stop='stop'):
-        return self.verifyGrouping(HarmonicState=HarmonicState, start_stop=start_stop) and self.tryGetBeatStrength()>=0.25
+        return self.verifyGrouping(HarmonicState=HarmonicState, start_stop=start_stop) and self.tryGetBeatStrength()>=0.5
 
     def verifyCadenceVoiceLeading(self, prev_soprano_pitch, curr_soprano_pitch, cadence_type='PAC'):
         retVal = True
