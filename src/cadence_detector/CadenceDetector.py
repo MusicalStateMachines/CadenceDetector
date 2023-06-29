@@ -3,6 +3,7 @@ import music21 as m21
 import math
 import os
 import pickle
+import pickle
 import enum
 import copy
 import sys
@@ -59,6 +60,9 @@ class CadenceDetector:
         self.analysis_full = []
         self.analysis_filtered = []
         self.analysis_transition_strings = []
+        self.PrevMeasureAlberti = False
+        self.PrevMeasureArpeggio = False
+
 
     def loadMusic21Corpus(self,fileString):
         self.NoteStream = m21.corpus.parse(fileString)
@@ -511,7 +515,7 @@ class CadenceDetector:
         return m21.key.Key(Music21StringKey,Music21StringMode)
 
     def isArpeggioPattern(self, pitches, lengths, arp_len, up_down=None):
-        if len(pitches) < arp_len or not all(lengths[0] == l for l in lengths[1:4]):
+        if len(pitches) < arp_len or not all(lengths[0] == l for l in lengths[1:-1]): # the final note in an arpeggio can be longer
             retVal = False
         else:
             retVal = True
@@ -542,11 +546,12 @@ class CadenceDetector:
         lowest_pitch_first = all(x.midi >= pitches[0].midi for x in pitches[1:4])
         lowest_pitch_third = all(x.midi >= pitches[2].midi for x in pitches[1:4])
         repetitve_pitch = (pitches[1].midi == pitches[3].midi or pitches[0].midi == pitches[2].midi)
+        consecutive_pitch = np.any(np.diff([x.midi for x in pitches]) == 0)
         # for pattern length 6 (3/4,3/8,6/8) verify last two as well, either continuing the same pattern or repeating the bass
         if pattern_len == 6:
             equal_durations = all(lengths[0] == l for l in lengths)
-            repetitve_pitch = repetitve_pitch and (pitches[3].midi == pitches[5].midi or pitches[0] == pitches[4])           
-        is_alberti = equal_durations and repetitve_pitch and (lowest_pitch_first or lowest_pitch_third)
+            repetitve_pitch = repetitve_pitch and (pitches[3].midi == pitches[5].midi or pitches[0] == pitches[4])
+        is_alberti = equal_durations and repetitve_pitch and (lowest_pitch_first or lowest_pitch_third) and not consecutive_pitch
         bass_pitch_index = None
         if lowest_pitch_first:
             bass_pitch_index = 0
@@ -573,33 +578,42 @@ class CadenceDetector:
         lowest_pitches_in_bass = self.extractBassLine(bass_general_notes)
         arp_patterns = []
 
-        for i in range(0, len(bass_general_notes), pattern_len):
-            if i+pattern_len <= len(bass_general_notes):
-                curr_pitches = lowest_pitches_in_bass['pitches'][i:i+pattern_len]
-                curr_lengths = lowest_pitches_in_bass['lengths'][i:i+pattern_len]
-                if None not in curr_pitches:
-                    if arp_type == 'alberti':
-                        isArp, bass_pitch_index = self.isAlbertiPattern(pitches=curr_pitches, lengths=curr_lengths, pattern_len=pattern_len)
-                    elif arp_type == 'arp_up':
-                        isArp = self.isArpeggioPattern(pitches=curr_pitches, lengths=curr_lengths, arp_len=pattern_len, up_down='up')
-                        bass_pitch_index = 0
-                    elif arp_type =='arp_down':
-                        isArp = self.isArpeggioPattern(pitches=curr_pitches, lengths=curr_lengths, arp_len=pattern_len, up_down='down')
-                        bass_pitch_index = 0
+        # need to loop like this because we advance the index based on finding arpeggios
+        i = 0
+        while i <= len(bass_general_notes)-pattern_len:
+            curr_pitches = lowest_pitches_in_bass['pitches'][i:i+pattern_len]
+            curr_lengths = lowest_pitches_in_bass['lengths'][i:i+pattern_len]
+            isArp = False
+            if None not in curr_pitches:
+                if any([cl > 1 for cl in curr_lengths]): # do not consider arps greater than quarter notes
+                    isArp = False
+                elif arp_type == 'alberti':
+                    isArp, bass_pitch_index = self.isAlbertiPattern(pitches=curr_pitches, lengths=curr_lengths, pattern_len=pattern_len)
+                elif arp_type == 'arp_up':
+                    isArp = self.isArpeggioPattern(pitches=curr_pitches, lengths=curr_lengths, arp_len=pattern_len, up_down='up')
+                    bass_pitch_index = 0
+                elif arp_type =='arp_down':
+                    isArp = self.isArpeggioPattern(pitches=curr_pitches, lengths=curr_lengths, arp_len=pattern_len, up_down='down')
+                    bass_pitch_index = 0
+                else:
+                    isArp = False
+                if isArp:
+                    epsilon = 0.1  # this epsilon is required to mark the last alberti beat including its length, but not the next beat
+                    # already assuming they are all equal length
+                    beat_diff = bass_general_notes[i+1].beat-bass_general_notes[i].beat # for some reason quarter length does not always provide this, TBD use seconds map
+                    if bass_pitch_index == 0:
+                        arp_patterns.append({'start': bass_general_notes[i + 1].beat,
+                                             'stop': bass_general_notes[i + pattern_len - 1].beat + beat_diff - epsilon})
                     else:
-                        isArp = False
-                    if isArp:
-                        epsilon = 0.1  # this epsilon is required to mark the last alberti beat including its length, but not the next beat
-                        if bass_pitch_index == 0:
-                            arp_patterns.append({'start': bass_general_notes[i + 1].beat,
-                                                 'stop': bass_general_notes[i + pattern_len - 1].beat + bass_general_notes[i + pattern_len - 1].duration.quarterLength - epsilon})
-                        else:
-                            # mark from beginning of pattern not including first note, to bass pitch index not included
-                            arp_patterns.append({'start': bass_general_notes[i + 1].beat,
-                                                 'stop': bass_general_notes[i + bass_pitch_index - 1].beat + bass_general_notes[i + bass_pitch_index - 1].duration.quarterLength - epsilon})
-                            # mark from note after bass pitch index to the end
-                            arp_patterns.append({'start': bass_general_notes[i + bass_pitch_index + 1].beat,
-                                                 'stop': bass_general_notes[i + pattern_len - 1].beat + bass_general_notes[i + pattern_len - 1].duration.quarterLength - epsilon})
+                        # mark from beginning of pattern not including first note, to bass pitch index not included
+                        arp_patterns.append({'start': bass_general_notes[i + 1].beat,
+                                             'stop': bass_general_notes[i + bass_pitch_index - 1].beat + beat_diff - epsilon})
+                        # mark from note after bass pitch index to the end
+                        arp_patterns.append({'start': bass_general_notes[i + bass_pitch_index + 1].beat,
+                                             'stop': bass_general_notes[i + pattern_len - 1].beat + beat_diff - epsilon})
+            # advance index by pattern length if alberti found, otherwise advance to next beat
+            i = i + pattern_len if isArp else i + 1
+
 
         arp_beats = [0] * len(measure_general_notes)
         for i,gen_note in enumerate(measure_general_notes):
@@ -659,7 +673,7 @@ class CadenceDetector:
         try:
             for currMeasureIndex in range(0,self.NumMeasures):
                 # debug per measure
-                if currMeasureIndex == 20:
+                if currMeasureIndex == 18:
                     bla = 0
                 # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
                 # for example, data that originates from midi cannot contain this info
@@ -699,11 +713,19 @@ class CadenceDetector:
                     AlbertiBeats6 = self.detectAlbertiOrArpeggioBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=6, arp_type='alberti')
                     AlbertiBeats = [x or y for (x, y) in zip(AlbertiBeats4, AlbertiBeats6)]
 
+                # consider Alberti only after the second consecutive measure
+                # AlbertiBeatsFiltered = [x and self.PrevMeasureAlberti for x in AlbertiBeats]
+                # self.PrevMeasureAlberti = any(AlbertiBeats)
+
                 ArpeggioBeats4 = self.detectAlbertiOrArpeggioBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=4, arp_type='arp_up')
                 ArpeggioBeats = ArpeggioBeats4
                 if curr_time_sig.ratioString in ['3/4', '6/8', '3/8']:
                     ArpeggioBeats3 = self.detectAlbertiOrArpeggioBassInMeasure(CurrMeasuresRestless, CurrMeasureBass, pattern_len=3, arp_type='arp_up')
                     ArpeggioBeats = [x or y for (x, y) in zip(ArpeggioBeats3, ArpeggioBeats4)]
+
+                # consider Arpeggio only after the second consecutive measure
+                ArpeggioBeatsFiltered = [x and self.PrevMeasureArpeggio for x in ArpeggioBeats]
+                self.PrevMeasureArpeggio = any(ArpeggioBeats)
 
                 LyricPerBeat = []
 
@@ -716,7 +738,7 @@ class CadenceDetector:
                 else:
                     currKey = self.KeyPerMeasure[currMeasureIndex]#lists start with 0
 
-                for thisChord, thisChordWithBassRests, alberti, arpeggio, thisRealNotes in zip(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'),CurrMeasures.recurse().getElementsByClass('GeneralNote'), AlbertiBeats, ArpeggioBeats, NotesPerChordBeatPerPart):
+                for thisChord, thisChordWithBassRests, alberti, arpeggio, thisRealNotes in zip(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'),CurrMeasures.recurse().getElementsByClass('GeneralNote'), AlbertiBeats, ArpeggioBeatsFiltered, NotesPerChordBeatPerPart):
                     if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or\
                             self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
                         currKeyString = self.Top2Keys[0][0]
@@ -741,11 +763,21 @@ class CadenceDetector:
                             self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, rn2.scaleDegree, rn2.inversion(), rn2.figure, alberti, arpeggio, rn2, thisRealNotes)
 
                     #TBD - should we handle this reversion in challenger?
-                    if self.HarmonicStateMachine.getRevertLastPACAndReset() and len(LyricPerBeat)>0: #this limits PAC reversion to within measure
+                    if self.HarmonicStateMachine.getRevertLastPACAndReset() and len(LyricPerBeat) > 0: #this limits PAC reversion to within measure
                         LastPACTuple = LyricPerBeat[-1]
                         UpdatedLyric = "IAC"
                         LyricPerBeat[-1] = [LastPACTuple[0], UpdatedLyric]
                         print("Reverting last PAC to IAC")
+                    if self.HarmonicStateMachine.getRevertLastHCAndReset() and len(LyricPerBeat) > 0:  # this limits HC reversion to within measure
+                        LastHCTuple = LyricPerBeat[-1]
+                        UpdatedLyric = ""
+                        LyricPerBeat[-1] = [LastHCTuple[0], UpdatedLyric]
+                        print("Reverting last HC")
+                    if self.HarmonicStateMachine.getRevertLastIACAndReset() and len(LyricPerBeat) > 0:  # this limits IAC reversion to within measure
+                        LastIACTuple = LyricPerBeat[-1]
+                        UpdatedLyric = ""
+                        LyricPerBeat[-1] = [LastIACTuple[0], UpdatedLyric]
+                        print("Reverting last IAC")
 
                     Lyric = self.HarmonicStateMachine.getCadentialOutputString()
                     LyricChallenger = self.HarmonicStateMachineChallenger.getCadentialOutputString()
@@ -757,10 +789,13 @@ class CadenceDetector:
                         resort = False
                         for cad in self.ReenforcementFactors:
                             if cad in Lyric:
-                                self.reenforceKeyByFactor(currKeyString, self.ReenforcementFactors[cad])
+                                # avoid reinforcement of HC if challenger is on dominant
+                                reenforce = not (currKey.getDominant().pitchClass == challengerKey.tonic.pitchClass and challengerKey.mode=='major' and (cad == 'HC'))
+                                if reenforce:
+                                    self.reenforceKeyByFactor(currKeyString, self.ReenforcementFactors[cad])
                             # Challenger Check (for key switching, but ignore HCs in subdominant key (becuase they are more likely PACs in main key))
                             if cad in LyricChallenger:
-                                reenforce =  not (challengerKey.tonic.pitchClass == self.getSubDominantPitchClass(currKey) and (cad == 'HC')) # and not (challengerKey.tonic.pitchClass == currKey.getDominant().pitchClass and (cad == 'PAC'))
+                                reenforce =  not (challengerKey.tonic.pitchClass == self.getSubDominantPitchClass(currKey) and challengerKey.mode=='major' and (cad == 'HC'))
                                 if reenforce:
                                     self.reenforceKeyByFactor(challengerKeyString, self.ReenforcementFactors[cad])
                                     resort = True
@@ -781,17 +816,11 @@ class CadenceDetector:
                         #TBD - do we still need to print this?
                         self.analysis_transition_strings.append(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds'] + measuresSecondsMap[currMeasureIndex]['durationSeconds']*(thisChord.beat-1)/CurrMeasuresRestless.duration.quarterLength:.1f} {self.HarmonicStateMachine.getCadentialOutput().value}")
 
-                #if self.HarmonicStateMachine.PACPending and len(LyricPerBeat) > 0:  # PAC reversion at end of measure in case PAC state was not exited within the measure
-                #    for i,curr_tup in enumerate(LyricPerBeat):
-                #        if 'PAC' in curr_tup[1]:
-                #            UpdatedLyric = "IAC"
-                #            LyricPerBeat[i] = [curr_tup[0], UpdatedLyric]
-                #            print("Reverting last PAC to IAC")
-
                 #checking cadences on entire measure
                 for LyricTuple in LyricPerBeat:
                     Lyric = LyricTuple[1]
-                    if "PAC" in Lyric or "IAC" in Lyric or "HC" in Lyric or "PCC" in Lyric:
+                    LyricsToPrint = ["PAC", "IAC", "HC", "PCC", "PCH"]
+                    if any([s in Lyric for s in LyricsToPrint]):
                         # incomplete and empty counters count measures that should be discarded
                         measure_to_write = measure_number - self.hasPickupMeasure - empty_measure_counter
                         print('Measure ', measure_to_write, ' offset ', measuresSecondsMap[currMeasureIndex]['offsetSeconds'], " ", Lyric)
@@ -820,7 +849,7 @@ class CadenceDetector:
                 coefs_per_measure.append(copy.deepcopy(self.CurrSmoothedInterpretations))
 
                 Parts = CurrMeasuresNotes.recurse().getElementsByClass(m21.stream.Part)
-                Lyrics_to_filter = ['CA'] # for filtering the display
+                Lyrics_to_filter = ['CA', '{', '}'] # for filtering the display
                 for thisLyric in LyricPerBeat:
                     if thisLyric[1] not in Lyrics_to_filter:
                         found = 0
@@ -848,6 +877,7 @@ class CadenceDetector:
         # self.NoteStream.insert(0, self.ChordStream)
         self.filter_notestream_by_language_model()
         self.filter_analysis_by_language_model()
+        self.cleanup_lyrics(['{', '}'])
         self.write_analysis_to_files()
 
         if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
@@ -861,94 +891,184 @@ class CadenceDetector:
             with open(CoefsFile, 'wb') as f:
                 pickle.dump(coefs_per_measure, f)
 
+    def isilos(self, sub, list_or_string):
+        if isinstance(list_or_string, list):
+            ret_val = any(sub in s for s in list_or_string)
+        else:
+            ret_val = sub in list_or_string
+        return ret_val
+
+    def cleanup_lyrics(self, lyric_list):
+        print('cleaning up lyrics')
+        for part in self.Parts:
+            for measure in part.recurse().getElementsByClass(m21.stream.Measure):
+                for thisNote in measure.recurse().getElementsByClass(m21.note.GeneralNote):
+                    for lyric in lyric_list:
+                        thisNote.lyric = thisNote.lyric.replace(lyric, '')
 
     def filter_notestream_by_language_model(self):
         print('Filtering lyrics by language model...')
         PrevMeasureNotes = None
         PrevMeasureLyrics = None
-        PrevParts = None
+        AnchorCadenceMeasureNumber = 0
+        PrevParts = []
+        empty_measure_counter = 0
         for currMeasureIndex in range(0, self.NumMeasures):
+            if self.EmptyMeasures[currMeasureIndex]:
+                empty_measure_counter = empty_measure_counter + 1
+                continue
             measure_number = currMeasureIndex + 1
-            CurrMeasuresNotes = self.NoteStream.measure(measure_number)
-            CurrParts = CurrMeasuresNotes.recurse().getElementsByClass(m21.stream.Part)
-            CurrMeasuresLyrics = []
+            CurrMeasureNotes = self.NoteStream.measure(measure_number)
+            CurrParts = CurrMeasureNotes.recurse().getElementsByClass(m21.stream.Part)
+
+            measure_number_for_score = measure_number - self.hasPickupMeasure - empty_measure_counter
+            even_meas_since_anchor = (measure_number_for_score - AnchorCadenceMeasureNumber) % 2 == 0
+
+            CurrMeasureLyrics = []
             for part in CurrParts:
                 for thisNote in part.flat.notesAndRests:
-                    CurrMeasuresLyrics.append(thisNote.lyric)
+                    CurrMeasureLyrics.append(thisNote.lyric)
+
+            def remove_lyric_from_parts(lyric_list, parts):
+                for part in parts:
+                    for thisNote in part.flat.notesAndRests:
+                        for lyric in lyric_list:
+                            thisNote.lyric = thisNote.lyric.replace(lyric, '')
+
             if PrevMeasureNotes and PrevMeasureLyrics:
-                # PAC, HC or PCC cancel previous HC
-                if 'HC' in PrevMeasureLyrics and ('PAC' in CurrMeasuresLyrics or 'HC' in CurrMeasuresLyrics or 'PCC' in CurrMeasuresLyrics):
-                    print(f'Filtering HC in measure {measure_number-1}')
-                    for part in PrevParts:
-                        for thisNote in part.flat.notesAndRests:
-                            thisNote.lyric = thisNote.lyric.replace('HC', '')
-                # PAC and PCC cancels HC in same measure
-                if 'HC' in CurrMeasuresLyrics and ('PAC' in CurrMeasuresLyrics or 'PCC' in CurrMeasuresLyrics):
-                    print(f'Filtering HC in measure {measure_number}')
-                    for part in CurrParts:
-                        for thisNote in part.flat.notesAndRests:
-                            thisNote.lyric = thisNote.lyric.replace('HC', '')
-                # HC cancels previous IAC
-                if 'IAC' in PrevMeasureLyrics and 'HC' in CurrMeasuresLyrics:
-                    print(f'Filtering IAC in measure {measure_number - 1}')
-                    for part in PrevParts:
-                        for thisNote in part.flat.notesAndRests:
-                            thisNote.lyric = thisNote.lyric.replace('IAC', '')
-                # HC cancels current IAC
-                if 'HC' in CurrMeasuresLyrics and 'IAC' in CurrMeasuresLyrics:
-                    print(f'Filtering IAC in measure {measure_number}')
-                    for part in CurrParts:
-                        for thisNote in part.flat.notesAndRests:
-                            thisNote.lyric = thisNote.lyric.replace('IAC', '')
-                # HC cancels forward IAC
-                if 'HC' in PrevMeasureLyrics and 'IAC' in CurrMeasuresLyrics:
-                    print(f'Filtering IAC in measure {measure_number}')
-                    for part in CurrParts:
-                        for thisNote in part.flat.notesAndRests:
-                            thisNote.lyric = thisNote.lyric.replace('IAC', '')
-                # PAC cancels forward HC
-                if 'PAC' in PrevMeasureLyrics and 'HC' in CurrMeasuresLyrics:
-                    print(f'Filtering HC in measure {measure_number}')
-                    for part in CurrParts:
-                        for thisNote in part.flat.notesAndRests:
-                            thisNote.lyric = thisNote.lyric.replace('HC', '')
-                if 'PAC' in CurrMeasuresLyrics and 'HC' in CurrMeasuresLyrics:
-                    print(f'Filtering HC in measure {measure_number}')
-                    for part in CurrParts:
-                        for thisNote in part.flat.notesAndRests:
-                            thisNote.lyric = thisNote.lyric.replace('HC', '')
-            PrevMeasureNotes = CurrMeasuresNotes
-            PrevMeasureLyrics = CurrMeasuresLyrics
+                # HC --> PAC
+                if (self.isilos('HC', PrevMeasureLyrics) or self.isilos('PCH', PrevMeasureLyrics)) and (self.isilos('PAC', CurrMeasureLyrics) or self.isilos('PCC', CurrMeasureLyrics)):
+                    if even_meas_since_anchor:
+                        print(f'Filtering HC in measure {measure_number_for_score-1}')
+                        remove_lyric_from_parts(['HC', 'PCH'], PrevParts)
+                # PAC --> HC
+                if self.isilos('PAC', PrevMeasureLyrics) and (self.isilos('HC', CurrMeasureLyrics) or self.isilos('PCH', CurrMeasureLyrics)):
+                    if not even_meas_since_anchor:
+                        print(f'Filtering HC in measure {measure_number_for_score}')
+                        remove_lyric_from_parts(['HC', 'PCH'], CurrParts)
+                # PAC + HC
+                if (self.isilos('HC', CurrMeasureLyrics) or self.isilos('PCH', CurrMeasureLyrics)) and (self.isilos('PAC', CurrMeasureLyrics) or self.isilos('PCC', CurrMeasureLyrics)):
+                    print(f'Filtering HC in measure {measure_number_for_score}')
+                    remove_lyric_from_parts(['HC', 'PCH'], CurrParts)
+                # HC --> IAC
+                if (self.isilos('HC', PrevMeasureLyrics) or self.isilos('PCH', PrevMeasureLyrics)) and (self.isilos('IAC', CurrMeasureLyrics)):
+                    if even_meas_since_anchor:
+                        print(f'Filtering HC in measure {measure_number_for_score - 1}')
+                        remove_lyric_from_parts(['HC','PCH'], PrevParts)
+                    else:
+                        print(f'Filtering IAC in measure {measure_number_for_score}')
+                        remove_lyric_from_parts(['IAC'], CurrParts)
+                # IAC --> HC
+                if self.isilos('IAC', PrevMeasureLyrics) and (self.isilos('HC', CurrMeasureLyrics) or self.isilos('PCH', CurrMeasureLyrics)):
+                    if even_meas_since_anchor:
+                        print(f'Filtering IAC in measure {measure_number_for_score - 1}')
+                        remove_lyric_from_parts(['IAC'], PrevParts)
+                    else:
+                        print(f'Filtering HC in measure {measure_number_for_score}')
+                        remove_lyric_from_parts(['HC', 'PCH'], CurrParts)
+                # HC+IAC
+                if (self.isilos('HC', CurrMeasureLyrics) or self.isilos('PCH', CurrMeasureLyrics)) and self.isilos('IAC', CurrMeasureLyrics):
+                    print(f'Filtering IAC in measure {measure_number_for_score}')
+                    remove_lyric_from_parts(['IAC'], CurrParts)
+                # PAC+IAC
+                if (self.isilos('PAC', CurrMeasureLyrics) or self.isilos('PCC', CurrMeasureLyrics)) and self.isilos('IAC', CurrMeasureLyrics):
+                    print(f'Filtering IAC in measure {measure_number_for_score}')
+                    remove_lyric_from_parts(['IAC'], CurrParts)
+                # PAC --> IAC
+                if (self.isilos('PAC', PrevMeasureLyrics) or self.isilos('PCC', PrevMeasureLyrics)) and self.isilos('IAC', CurrMeasureLyrics):
+                    print(f'Filtering IAC in measure {measure_number_for_score}')
+                    remove_lyric_from_parts(['IAC'], CurrParts)
+
+            # get lyrics again after filtering
+            CurrMeasureLyrics = []
+            for part in CurrParts:
+                for thisNote in part.flat.notesAndRests:
+                    CurrMeasureLyrics.append(thisNote.lyric)
+            PrevMeasureLyrics = []
+            for part in PrevParts:
+                for thisNote in part.flat.notesAndRests:
+                    PrevMeasureLyrics.append(thisNote.lyric)
+
+            # update anchor cadence from prev part
+            anchor_cad_strings = ['PAC', 'PCC']
+            if PrevMeasureLyrics and any(self.isilos(s, PrevMeasureLyrics) for s in anchor_cad_strings):
+                AnchorCadenceMeasureNumber = measure_number_for_score - 1
+
+            PrevMeasureNotes = CurrMeasureNotes
+            PrevMeasureLyrics = CurrMeasureLyrics
             PrevParts = CurrParts
+
 
     def filter_analysis_by_language_model(self):
         print('Filtering analysis results by language model...')
         self.analysis_full_filtered = copy.deepcopy(self.analysis_full)
         items_to_remove = []
-        prev_cad = None
+        prev_cad = {'Measure':0, 'Lyric':[]}
+        anchor_cad = {'Measure':0, 'Lyric':[]}
         for item in self.analysis_full_filtered:
             curr_cad = item
-            if prev_cad:
-                if curr_cad['Measure'] - prev_cad['Measure'] <= 1:
-                    # PAC, HC or PCC cancel previous HC
-                    if prev_cad['Lyric'] == 'HC' and curr_cad['Lyric'] in ['PAC', 'HC', 'PCC']:
-                        print(f"Filtering HC in measure {prev_cad['Measure']}")
-                        if prev_cad not in items_to_remove: items_to_remove.append(prev_cad)
-                    # HC cancels IAC backward
-                    if prev_cad['Lyric'] == 'IAC' and curr_cad['Lyric'] == 'HC':
+            # check if cadence in analysis line
+            cad_strings = ['PAC', 'PCC', 'HC', 'PCH', 'IAC']
+            if not any(s in curr_cad['Lyric'] for s in cad_strings):
+                continue
+            even_meas_since_anchor = (curr_cad['Measure'] - anchor_cad['Measure']) % 2 == 0
+            if curr_cad['Measure'] - prev_cad['Measure'] <= 1:
+                # HC --> PAC and HC+PAC
+                if ('HC' in prev_cad['Lyric'] or 'PCH' in prev_cad['Lyric']) and ('PAC' in curr_cad['Lyric'] or 'PCC' in curr_cad['Lyric']):
+                    if even_meas_since_anchor:
+                        if prev_cad not in items_to_remove:
+                            print(f"Filtering HC in measure {prev_cad['Measure']}")
+                            items_to_remove.append(prev_cad)
+                # PAC --> HC and PAC+HC
+                if ('PAC' in prev_cad['Lyric'] or 'PCC' in prev_cad['Lyric']) and ('HC' in curr_cad['Lyric'] or 'PCH' in curr_cad['Lyric']):
+                    if not even_meas_since_anchor or curr_cad['Measure'] == prev_cad['Measure']:
+                        if curr_cad not in items_to_remove:
+                            print(f"Filtering HC in measure {curr_cad['Measure']}")
+                            items_to_remove.append(curr_cad)
+                # HC --> IAC
+                if ('HC' in prev_cad['Lyric'] or 'PCH' in prev_cad['Lyric']) and 'IAC' in curr_cad['Lyric']:
+                    if even_meas_since_anchor and curr_cad['Measure'] > prev_cad['Measure']:
+                        if prev_cad not in items_to_remove:
+                            print(f"Filtering HC in measure {prev_cad['Measure']}")
+                            items_to_remove.append(prev_cad)
+                    else:
+                        if curr_cad not in items_to_remove:
+                            print(f"Filtering IAC in measure {curr_cad['Measure']}")
+                            items_to_remove.append(curr_cad)
+                # IAC --> HC
+                if 'IAC' in prev_cad['Lyric'] and ('HC' in curr_cad['Lyric'] or 'PCH' in curr_cad['Lyric']):
+                    if even_meas_since_anchor or curr_cad['Measure'] == prev_cad['Measure']:
+                        if prev_cad not in items_to_remove:
+                            print(f"Filtering IAC in measure {prev_cad['Measure']}")
+                            items_to_remove.append(prev_cad)
+                    else:
+                        if curr_cad not in items_to_remove:
+                            print(f"Filtering HC in measure {curr_cad['Measure']}")
+                            items_to_remove.append(curr_cad)
+                # IAC --> PAC
+                if 'IAC' in prev_cad['Lyric'] and ('PAC' in curr_cad['Lyric'] or 'PCC' in curr_cad['Lyric']):
+                    if prev_cad not in items_to_remove:
                         print(f"Filtering IAC in measure {prev_cad['Measure']}")
-                        if prev_cad not in items_to_remove: items_to_remove.append(prev_cad)
-                    # HC cancels IAC forward
-                    if prev_cad['Lyric'] == 'HC' and curr_cad['Lyric'] == 'IAC':
+                        items_to_remove.append(prev_cad)
+                # PAC --> IAC
+                if 'IAC' in curr_cad['Lyric'] and ('PAC' in prev_cad['Lyric'] or 'PCC' in prev_cad['Lyric']):
+                    if curr_cad not in items_to_remove:
                         print(f"Filtering IAC in measure {curr_cad['Measure']}")
-                        if curr_cad not in items_to_remove: items_to_remove.append(curr_cad)
-                    # PAC cancels HC forward
-                    if prev_cad['Lyric'] == 'PAC' and curr_cad['Lyric'] == 'HC':
-                        print(f"Filtering HC in measure {curr_cad['Measure']}")
-                        if curr_cad not in items_to_remove: items_to_remove.append(curr_cad)
-            prev_cad = curr_cad
+                        items_to_remove.append(curr_cad)
+
+
+            # update cadence only if not removed
+            if curr_cad not in items_to_remove:
+                if prev_cad not in items_to_remove:
+                    # update anchor cadence only on PAC and HC
+                    anchor_cad_strings = ['PAC', 'PCC']
+                    if any(s in prev_cad['Lyric'] for s in anchor_cad_strings):
+                        anchor_cad = prev_cad
+                # update prev cad always
+                prev_cad = curr_cad
+
         for item in items_to_remove:
-            self.analysis_full_filtered.remove(item)
+            self.analysis_full_filtered = list(filter(lambda a: a != item, self.analysis_full_filtered))
 
     def write_analysis_to_files(self):
         fileName = self.fileName.replace(".", "_")
@@ -969,8 +1089,11 @@ class CadenceDetector:
                 CadString = "HC"
             elif "PCC" in Lyric:
                 CadString = "PCC"
+            elif "PCH" in Lyric:
+                CadString = "PCH"
             CadStringToNumMap = {"PAC": CDCadentialStates.PACArrival.value, "IAC": CDCadentialStates.IACArrival.value,
-                                 "HC": CDCadentialStates.HCArrival.value, "PCC": CDCadentialStates.PCCArrival.value}
+                                 "HC": CDCadentialStates.HCArrival.value, "PCC": CDCadentialStates.PCCArrival.value,
+                                 "PCH": CDCadentialStates.PCHArrival.value}
             print(f"{item['Measure']} {item['Offset']} {CadStringToNumMap[CadString]}", file=text_fileOffsets)
 
         for item in self.analysis_transition_strings:
@@ -1001,6 +1124,9 @@ class CadenceDetector:
                 self.HarmonicStateMachine.CadentialKeyChange = 1
             if challengerKeyString == self.PrevKeyString:
                 self.HarmonicStateMachineChallenger = copy.deepcopy(tempStateMachine)
+            # reset post cadential counters
+            self.HarmonicStateMachine.resetPostCadentialCounters()
+            self.HarmonicStateMachineChallenger.resetPostCadentialCounters()
         self.PrevKeyString = currKeyString
         self.PrevChallengerKeyString = challengerKeyString
         self.HarmonicStateMachine.IsChallenger = False

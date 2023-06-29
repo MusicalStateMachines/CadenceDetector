@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "cadence_detector"
-version = "0.0.18"
+version = "0.2.0"
 authors = [
   { name="Matan Ben-Asher", email="mbenasher@yahoo.com" },
 ]
@@ -15,12 +15,12 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-#dependencies = [
-#    "music21",
-#    "numpy",
-#    "pandas",
-#    "tqdm",
-#]
+dependencies = [
+    "music21",
+    "numpy",
+    "pandas",
+    "tqdm",
+]
 [project.urls]
 "Homepage" = "https://github.com/MusicalStateMachines/CadenceDetector"
 "Bug Tracker" = "https://github.com/MusicalStateMachines/CadenceDetector/issues"

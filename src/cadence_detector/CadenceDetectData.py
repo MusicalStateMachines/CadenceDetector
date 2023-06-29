@@ -15,6 +15,7 @@ class CDCadentialStates(Enum):
     IACArrivalExpected = 12
     HCAppoggExpected = 13
     BassAppoggExpected = 14
+    PCHArrival = 15
 
 class CDHarmonicChordDegrees(Enum):
     I = 1

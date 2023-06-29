@@ -171,7 +171,7 @@ ABCData.Composer = "Beethoven"
 # ==================================
 TestData = DCMData
 optimize_false_positives = False
-CadenceString = "PAC"
+CadenceString = "HC"
 
 # set state machine data
 StateMachineData = LabeledData()

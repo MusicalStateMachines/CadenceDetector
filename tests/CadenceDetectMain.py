@@ -10,20 +10,23 @@ SearsHaydnPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 DCMLabMozartPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml'
 DCMBeethovenPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data/mxl'
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
-# all files
+
+# select analysis path
+InputFilePath = DCMLabMozartPath
+OutputFilePath = MyPath
+
+# select files
+# all files in path
 XMLFileEnding = ".xml"
 # haydn singe file
-XMLFileEnding = "op033_no02_mv01.xml"
+# XMLFileEnding = "op017_no04_mv01.xml"
 # mozart single file
-#XMLFileEnding = "284-3.xml"
-# beethoven single file
+XMLFileEnding = "457-2.xml"
+# XMLFileEnding = "331-1.xml"
+# beethoven single file1
 # XMLFileEnding = "op130_no13_mov6.mxl"
 # multi-core processing
 DoParallelProcessing = XMLFileEnding in ['.xml', '.mxl']
-
-# select analysis path
-InputFilePath = SearsHaydnPath
-OutputFilePath = MyPath
 
 #===for testing a single file not in database
 #TestPath = "/Users/matanba/Dropbox/PhD/CadencesResearch/TestData/"
@@ -42,7 +45,7 @@ RunCadenceDetection = 1
 OnlyGetNumMeasures = False
 # Cadence Detector Tunable Parameters
 MaxNumMeasures = 500
-MinInitialMeasures = 0
+MinInitialMeasures = 3
 MinPostCadenceMeasuresDict = {SearsHaydnPath: 2, DCMLabMozartPath: 0, DCMBeethovenPath: 0}
 MinPostCadenceMeasures = MinPostCadenceMeasuresDict[InputFilePath]
 KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive

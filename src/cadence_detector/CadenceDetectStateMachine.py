@@ -7,8 +7,9 @@ class CDStateMachine(object):
     def __init__(self, isChallenger=False, minInitialMeasures=0, minPostCadenceMeasures=0):
         self.NumParts = 0
         self.MeasureCounter = 0 # measure counter is for the entire movement and not included in reset
-        self.MinInitialMeasures = minInitialMeasures
+        self.MinInitialMeasures = {CDCadentialStates.PACArrival: minInitialMeasures, CDCadentialStates.IACArrival: minInitialMeasures, CDCadentialStates.HCArrival: round(minInitialMeasures/2)}
         self.MinPostCadenceMeasures = minPostCadenceMeasures
+        self.MinPostCadenceMeasuresHC = minPostCadenceMeasures+1
         self.IsChallenger = isChallenger
         self.reset()
 
@@ -16,27 +17,37 @@ class CDStateMachine(object):
         # initiliaze with invalid states
         self.PrevCadentialState = CDCadentialStates.Idle
         self.CurrCadentialState = CDCadentialStates.Idle
-        self.CurrHarmonicState = CDHarmonicState([], [], [],  0, 0, 0, 0, 0, 0, [], [])
-        self.PrevHarmonicState = self.CurrHarmonicState
         self.CurrCadentialOutput = CDCadentialStates.Idle
         self.CurrHarmonicState = CDHarmonicState([], chord.Chord(), chord.Chord(), 0, 0, 0, 0, 0, meter.TimeSignature(), [], [])
+        self.PrevHarmonicState = self.CurrHarmonicState
+        self.LastNonAlbertiHarmonicState = self.CurrHarmonicState
         self.ChangeFlagOneShot = 0
         self.KeyChangeOneShot = 0
         self.FirstKeyDetectionDone = 0
         self.CadentialKeyChange = 0
         self.TriggerString = str("")
-        self.PostCadenceMeasureCounter = self.MinPostCadenceMeasures
+        self.PostPACMeasureCounter = self.MinPostCadenceMeasures
+        self.PostHCMeasureCounter = self.MinPostCadenceMeasuresHC
         self.CheckBassPartFromChord = False
         self.PACPending = False
         self.RevertLastPAC = False
         self.HCPending = False
         self.RevertLastHC = False
+        self.RevertLastIAC = False
         self.HarmonicStateOfLastCadence = 0
         self.SopranoOfLastCadence = 0
         self.WeightOfLastCadence = 0
+        self.PrevMeasureAlberti = False
+        self.PrevMeasureArpeggio = False
+
+    def resetPostCadentialCounters(self):
+        self.PostPACMeasureCounter = self.MinPostCadenceMeasures
+        self.PostHCMeasureCounter = self.MinPostCadenceMeasuresHC
 
     def updateHarmonicState(self, Key, Chord, ChordWithRests, ChordDegree, ChordInversion, ChordFigure, Alberti, Arpeggio, RomamNumeral, RealNotes):
 
+        if not (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
+            self.LastNonAlbertiHarmonicState = copy.deepcopy(self.CurrHarmonicState)
         self.PrevHarmonicState = copy.deepcopy(self.CurrHarmonicState)
         self.KeyChangeOneShot = 0
         if self.CurrHarmonicState.Key and self.CurrHarmonicState.Key != Key:
@@ -62,7 +73,9 @@ class CDStateMachine(object):
             self.TriggerString = self.TriggerString.translate(SUB)
             self.PrevCadentialState = self.CurrCadentialState
             if self.CurrCadentialState == CDCadentialStates.PACArrival or self.CurrCadentialState == CDCadentialStates.PCCArrival:
-                self.PostCadenceMeasureCounter = -1
+                self.PostPACMeasureCounter = -1
+            elif self.CurrCadentialState == CDCadentialStates.HCArrival or self.CurrCadentialState == CDCadentialStates.PCHArrival:
+                self.PostHCMeasureCounter = -1
 
     def getBassFromChord(self, chord, favor_by_part=False):
         retVal = False
@@ -84,22 +97,24 @@ class CDStateMachine(object):
                         retVal = lowestPitch
         return retVal
 
-    def compareBassWithPitch(self, pitchClass, mode='any', favor_by_part=False):
+    def compareBassWithPitch(self, pitchClass, mode='any', favor_by_part=False, HarmonicState=None):
+        if HarmonicState is None:
+            HarmonicState = self.CurrHarmonicState
         retVal = False
         bassPitch = []
         if mode in ['any', 'restless']:
             if not retVal:
-                bassPitch = self.getBassFromChord(self.CurrHarmonicState.Chord, favor_by_part=favor_by_part)
+                bassPitch = self.getBassFromChord(HarmonicState.Chord, favor_by_part=favor_by_part)
                 if bassPitch:
                     retVal = bassPitch.pitchClass==pitchClass
         if mode in ['any', 'orig']:
             if not bassPitch:
-                bassPitch = self.getBassFromChord(self.CurrHarmonicState.ChordWithBassRests, favor_by_part=favor_by_part)
+                bassPitch = self.getBassFromChord(HarmonicState.ChordWithBassRests, favor_by_part=favor_by_part)
                 if bassPitch:
                     retVal = bassPitch.pitchClass==pitchClass
         return retVal
 
-    def isSopraneOnDegree(self,deg):
+    def isSopranoOnDegree(self, deg):
         retVal = 0
         if not isinstance(deg, list):
             deg = [deg]
@@ -175,10 +190,18 @@ class CDStateMachine(object):
                 break
         return retPitch
 
-    def isDominantBass(self, favor_by_part=False):
-        dominantPitchClass = self.CurrHarmonicState.Key.pitchFromDegree(5).pitchClass
+    def isDominantBass(self, favor_by_part=False, HarmonicState=None):
+        if HarmonicState is None:
+            HarmonicState = self.CurrHarmonicState
+        dominantPitchClass = HarmonicState.Key.pitchFromDegree(5).pitchClass
         # chordify may miss the correct bass, check all notes by frequency ascending
-        retVal = self.compareBassWithPitch(dominantPitchClass, mode='any', favor_by_part=favor_by_part)
+        retVal = self.compareBassWithPitch(dominantPitchClass, mode='any', favor_by_part=favor_by_part, HarmonicState=HarmonicState)
+        return retVal
+
+    def isSubDominantBass(self, favor_by_part=False):
+        subDominantPitchClass = self.CurrHarmonicState.Key.pitchFromDegree(4).pitchClass
+        # chordify may miss the correct bass, check all notes by frequency ascending
+        retVal = self.compareBassWithPitch(subDominantPitchClass, mode='any', favor_by_part=favor_by_part)
         return retVal
 
     def isMediantBass(self, favor_by_part=False):
@@ -200,7 +223,8 @@ class CDStateMachine(object):
                (self.CurrHarmonicState.RomanNumeral.quality == self.CurrHarmonicState.Key.mode)
 
     def harmonyHasSeventh(self, HarmonicState):
-        return not (HarmonicState.Chord.seventh is None)
+        return self.harmonyContainsPitchDegree(HarmonicState=HarmonicState, degree=4)
+        #return not (HarmonicState.Chord.seventh is None)
 
     def harmonyHasTonic(self,  HarmonicState):
         return self.harmonyContainsPitchDegree(HarmonicState=HarmonicState, degree=1)
@@ -208,8 +232,36 @@ class CDStateMachine(object):
     def harmonyHasMediant(self, HarmonicState):
         return self.harmonyContainsPitchDegree(HarmonicState=HarmonicState, degree=3)
 
+    # TBD - should obsolete this function
     def verifyNotI64(self, HarmonicState):
-        return not (self.harmonyHasTonic(HarmonicState) or self.harmonyHasMediant(HarmonicState))
+        return not (self.harmonyHasTonic(HarmonicState) or self.harmonyHasMediant(HarmonicState)) or self.harmonyHasSeventh(HarmonicState)
+
+    def isI64(self, HarmonicState):
+        return self.harmonyContainsOnlyPitchDegrees(HarmonicState=HarmonicState, degrees=[1, 3, 5]) and\
+               (self.harmonyHasTonic(HarmonicState) or self.harmonyHasMediant(HarmonicState)) and\
+               self.isDominantBass(HarmonicState=HarmonicState)
+
+    def harmonyContainsOnlyPitchDegrees(self, HarmonicState, degrees):
+        pitch_classes = [HarmonicState.Key.pitchFromDegree(degree).pitchClass for degree in degrees]
+        return self.harmonyContainsOnlyPitchClasses(HarmonicState=HarmonicState, pitch_classes=pitch_classes)
+
+    def harmonyContainsOnlyPitchClasses(self, HarmonicState, pitch_classes):
+        retVal = True
+        if not HarmonicState.ChordWithBassRests.isRest:
+            for p in HarmonicState.ChordWithBassRests.pitches:
+                if p.pitchClass not in pitch_classes:
+                    retVal = False
+                    break
+        return retVal
+
+    def isDominantHarmony(self, HarmonicState):
+        dominant_harmony_degrees = [5, 2, 4] # first without leading tone
+        pitch_classes = [HarmonicState.Key.pitchFromDegree(degree).pitchClass for degree in dominant_harmony_degrees]
+        leading_tone_pitch_class = HarmonicState.Key.pitchFromDegree(7).pitchClass
+        if HarmonicState.Key.mode == 'minor':
+            leading_tone_pitch_class = (leading_tone_pitch_class + 1) % 12 # raise the leading tone
+        pitch_classes.append(leading_tone_pitch_class)
+        return self.harmonyContainsOnlyPitchClasses(HarmonicState=HarmonicState, pitch_classes=pitch_classes)
 
     def harmonyContainsPitchDegree(self, HarmonicState, degree):
         retVal = False
@@ -263,6 +315,39 @@ class CDStateMachine(object):
                     break
         return retVal
 
+    def isDominantEmbellishment(self):
+        retVal = 0
+        VpitchClass = self.CurrHarmonicState.Key.pitchFromDegree(5).pitchClass
+        if self.CurrHarmonicState.Key.mode == 'major':
+            # Vb,V#,VIIb,IIb,II#
+            embellishment_offsets = [-1, 1, 3, 6, 8]
+        else:
+            # Vb,V#,VIIb,IIb
+            embellishment_offsets = [-1, 1, 3, 6]
+        embellishments = [(VpitchClass + eo) % 12 for eo in embellishment_offsets]
+        if not self.CurrHarmonicState.Chord.isRest:
+            for p in self.CurrHarmonicState.Chord.pitches:
+                if p.pitchClass in embellishments:
+                    retVal = 1
+                    break
+        return retVal
+
+    def isVMajorExclusive(self, HarmonicState):
+        retVal = 1
+        VpitchClass = self.CurrHarmonicState.Key.pitchFromDegree(5).pitchClass
+        # V,VII,II
+        major_triad_offsets = [0, 4, 7]
+        VchordPitchClass = [(VpitchClass + mto) % 12 for mto in major_triad_offsets]
+        if not HarmonicState.Chord.isRest:
+            for p in HarmonicState.Chord.pitches:
+                if p.pitchClass not in VchordPitchClass:
+                    retVal = 0
+                    break
+        return retVal
+
+    def verifyHCHarmony(self, HarmonicState):
+        return self.isVMajorExclusive(HarmonicState)
+
     def isUnison(self):
         retVal = 1
         Pitch0 = self.CurrHarmonicState.Chord.pitches[0].pitchClass
@@ -296,15 +381,16 @@ class CDStateMachine(object):
     def verifyIACGrouping(self, HarmonicState):
         return self.verifyGrouping(HarmonicState=HarmonicState, start_stop='stop')
 
-    def verifyHCGrouping(self, HarmonicState):
-        return self.verifyGrouping(HarmonicState=HarmonicState, start_stop='stop')
+    def verifyHCGrouping(self, HarmonicState, start_stop='stop'):
+        return self.verifyGrouping(HarmonicState=HarmonicState, start_stop=start_stop) and self.tryGetBeatStrength()>=0.25
 
     def verifyCadenceVoiceLeading(self, prev_soprano_pitch, curr_soprano_pitch, cadence_type='PAC'):
         retVal = True
         if curr_soprano_pitch and prev_soprano_pitch:
             midi_diff = curr_soprano_pitch.midi - prev_soprano_pitch.midi
             allowed_interval_table = {'PAC': np.array([0, 1, -2, -3, -4, 5, -7]), # anticipated tonic, minor second up, major second down, major/minor third down, fourth up, fifth down
-                                      'IAC': np.array([0, 2, 3, 4, -1, -2, -3, -4])}  # anticipated third or fifth, major second up, major/minor second down, major/minor third up and down
+                                      'IAC': np.array([0, 1, 2, 3, 4, -1, -2, -3, -4, 5]),  # anticipated third or fifth, major/minor second up, major/minor second down, major/minor third up and down, fourth up
+                                      'HC': np.array([0, 1, 2, -1, -2, -5, -7])}
             allowed_intervals = allowed_interval_table[cadence_type]
             allowed_intervals_full = np.concatenate((allowed_intervals, allowed_intervals-12, allowed_intervals+12)) # check also an octave down and up, Mozart K533-1, Haydn17_3_4
             retVal = midi_diff in allowed_intervals_full
@@ -380,16 +466,12 @@ class CDStateMachine(object):
                     if isinstance(self.PrevHarmonicState.Key, key.Key):
                         dominantPitchClass = self.PrevHarmonicState.Key.pitchFromDegree(5).pitchClass
                         bassPitch = self.getBassFromChord(self.PrevHarmonicState.Chord)
-                        if bassPitch and bassPitch.pitchClass == dominantPitchClass and self.verifyNotI64(HarmonicState=self.PrevHarmonicState):
-                            curr_state = CDCadentialStates.HCArrival
-                            self.WeightOfLastCadence = self.tryGetBeatStrength()
+                        if bassPitch and bassPitch.pitchClass == dominantPitchClass and not self.isI64(HarmonicState=self.PrevHarmonicState) and self.verifySopranoVoiceLeading(cadence_type='HC'):
+                            curr_state = self.setCadenceOrPostCadence(CDCadentialStates.HCArrival, curr_state)
                 else:
                     curr_state = curr_state
-            elif self.isSecondaryDominantLeadingTone():# or (self.CurrHarmonicState.Key.mode=='major' and self.isSecondaryDominantUpperLeadingTone()): #this can create false HCs, need to consider non-cadential chromatic situations
+            elif self.isDominantEmbellishment():# this can create false HCs, need to consider non-cadential chromatic situations
                 curr_state = CDCadentialStates.HCArrivalExpected
-            elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
-                #if alberti and weak beat do nothing
-                curr_state = curr_state
             elif self.CurrHarmonicState.ChordWithBassRests.isRest:
                 curr_state = curr_state
             elif self.compareBassWithPitch(self.CurrHarmonicState.Key.pitchFromDegree(4).pitchClass, mode='any'):
@@ -402,93 +484,120 @@ class CDStateMachine(object):
                 #== bass in 3rd degree - iii or I6 on strong beat go to expecting cadence
                 curr_state = CDCadentialStates.CadExpected
 
-        # ==========================================
-        # ====expecting cadence, wait for V=========
-        # ==========================================
+        # ===================================================
+        # ====expecting cadence, wait for V Dominant=========
+        # ===================================================
         elif curr_state == CDCadentialStates.CadExpected or curr_state == CDCadentialStates.CadAvoided or curr_state == CDCadentialStates.IACArrival:
             # only stay in CadAvoided once (currently for display purposes)
-            if curr_state == CDCadentialStates.CadAvoided or curr_state == CDCadentialStates.IACArrival:
+            if curr_state == CDCadentialStates.CadAvoided:
                 curr_state = CDCadentialStates.CadExpected
-            if self.CurrHarmonicState.ChordWithBassRests.isRest:
-                curr_state = curr_state
-            #ignoring arppegios unless they contain dominant seventh chord
-            elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio) and not (self.isDominantBass() and self.harmonyHasSeventh(self.CurrHarmonicState)):
-                #if alberti or arpeggio bass unless explicit V chord
-                curr_state = curr_state
-            elif self.isDominantBass(favor_by_part=True) and self.verifyNotI64(self.CurrHarmonicState):
-                if (self.CurrHarmonicState.ChordDegree == CDHarmonicChordDegrees.V.value or self.tryGetBeatStrength()>=0.5):
-                    curr_state = CDCadentialStates.CadInevitable
-            elif self.isDominantBass(favor_by_part=True) and not self.verifyNotI64(self.CurrHarmonicState): #I64 can be HC appoggiaturra
-                curr_state = CDCadentialStates.HCAppoggExpected
-            elif self.isSecondaryDominantLeadingTone() or self.isSecondaryDominantUpperLeadingTone(): #this can create false HCs, need to consider non-cadential chromatic situations
+            elif curr_state == CDCadentialStates.IACArrival and not (self.isTonicBass() and self.isSopranoOnDegree(1)):
+                curr_state = CDCadentialStates.CadExpected
+            elif curr_state == CDCadentialStates.IACArrival and self.tryGetBeatStrength() == 1:
+                curr_state = CDCadentialStates.CadExpected
+            # now start the real state logic
+            if curr_state == CDCadentialStates.IACArrival and (self.isTonicBass() and self.isSopranoOnDegree(1)):
+                self.RevertLastIAC = True
+                curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival, curr_state, verify_beat_strength=False)
+            elif self.isDominantEmbellishment():
                 curr_state = CDCadentialStates.HCArrivalExpected
+            elif self.CurrHarmonicState.ChordWithBassRests.isRest:
+                curr_state = curr_state
+            #ignoring arppegios
+            elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
+                #if alberti or arpeggio bass unless explicit V chord
+                if self.isDominantBass(HarmonicState=self.LastNonAlbertiHarmonicState) and self.harmonyHasSeventh(self.CurrHarmonicState):
+                    curr_state = CDCadentialStates.CadInevitable
+                else:
+                    curr_state = curr_state
+            elif self.isDominantBass() and self.harmonyHasSeventh(self.CurrHarmonicState):
+                curr_state = CDCadentialStates.CadInevitable
+            elif self.isTonicBass():
+                curr_state = CDCadentialStates.HCArrivalExpected
+            elif self.isDominantBass(favor_by_part=True):
+                if not self.isI64(self.CurrHarmonicState):
+                    if self.verifySopranoVoiceLeading(cadence_type='HC') and \
+                        ((self.tryGetBeatStrength()==1 and self.verifyHCGrouping(HarmonicState=self.CurrHarmonicState)) or
+                         self.verifyHCGrouping(HarmonicState=self.CurrHarmonicState, start_stop='stop')) and\
+                            self.verifyHCHarmony(HarmonicState=self.CurrHarmonicState):
+                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.HCArrival, curr_state)
+                    else:
+                        curr_state = CDCadentialStates.CadInevitable
+                else:
+                    curr_state = CDCadentialStates.HCAppoggExpected
 
         # ========================================================
         # ====inevitable cadence (PAC or IAC), wait for Is========
         # ========================================================
         elif curr_state==CDCadentialStates.CadInevitable or curr_state==CDCadentialStates.IACArrivalExpected:
-            #on dominant and then a complete rest --> HC
+            #on dominant and then a complete rest --> HC with constraints
             if self.CurrHarmonicState.ChordWithBassRests.isRest:
-                if curr_state==CDCadentialStates.CadInevitable and self.verifyHCGrouping(HarmonicState=self.PrevHarmonicState) and self.verifyNotI64(HarmonicState=self.PrevHarmonicState) and not self.harmonyHasSeventh(HarmonicState=self.PrevHarmonicState):
-                    curr_state = CDCadentialStates.HCArrival
-                    self.WeightOfLastCadence = self.tryGetBeatStrength()
+                if self.verifySopranoVoiceLeading(cadence_type='HC') and\
+                        self.verifyHCGrouping(HarmonicState=self.PrevHarmonicState) and\
+                        self.verifyHCHarmony(HarmonicState=self.PrevHarmonicState):
+                    curr_state = self.setCadenceOrPostCadence(CDCadentialStates.HCArrival, curr_state)
                 else:
                     curr_state = curr_state
-            elif self.isBassPartRest() and self.isDominantBass(favor_by_part=True) and self.verifyHCGrouping(HarmonicState=self.PrevHarmonicState) and self.verifyNotI64(HarmonicState=self.CurrHarmonicState) and not self.harmonyHasSeventh(HarmonicState=self.CurrHarmonicState):
-                if curr_state==CDCadentialStates.CadInevitable:
-                    curr_state = CDCadentialStates.HCArrival
-                    self.WeightOfLastCadence = self.tryGetBeatStrength()
-                else:
-                    curr_state = curr_state
-            elif self.isSecondaryDominantLeadingTone():
+            # on dominant and then bass rest --> HC with constraints
+            elif self.isBassPartRest() and\
+                    self.isDominantBass(favor_by_part=True) and\
+                    self.verifyHCGrouping(HarmonicState=self.CurrHarmonicState) and\
+                    self.verifyHCHarmony(HarmonicState=self.CurrHarmonicState):
+                curr_state = self.setCadenceOrPostCadence(CDCadentialStates.HCArrival, curr_state)
+            elif self.isDominantEmbellishment():
                 curr_state = CDCadentialStates.HCArrivalExpected
+            elif (self.isI64(HarmonicState=self.CurrHarmonicState) and not self.isBassPartRest()):
+                curr_state = CDCadentialStates.HCAppoggExpected
             elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
                 #if alberti and weak beat do nothing
                 curr_state = curr_state
             else:
-                # for the case where in IAC expected and dominant appears again, the back to Cad inevitable (TBD, separate these states)
-                if not self.isBassPartRest() and self.isDominantBass(favor_by_part=True) and not (curr_state==CDCadentialStates.IACArrivalExpected and self.isSopraneOnDegree(1)):
+                # for the case where in IAC expected and dominant appears again, back to Cad inevitable
+                if curr_state==CDCadentialStates.IACArrivalExpected and self.isDominantBass(favor_by_part=True) and not self.isBassPartRest():
                     curr_state = CDCadentialStates.CadInevitable
                 # meter - look for cadences on strong beat:
                 elif self.tryGetBeatStrength() >= 0.25:#cadence can only occur on strong beats
                     # harmony  - chordal degree and bass analysis
                     # bass rest on strong beat --> HC
-                    if curr_state==CDCadentialStates.CadInevitable and\
-                            self.getBassFromChord(self.CurrHarmonicState.ChordWithBassRests)==0 and\
+                    if self.isDominantBass(favor_by_part=True) and\
+                            self.isBassPartRest() and\
                             self.tryGetBeatStrength() < 1.0 and\
                             self.verifyHCGrouping(self.CurrHarmonicState) and\
-                            self.verifyNotI64(self.CurrHarmonicState):
-                        curr_state = CDCadentialStates.HCArrival
-                        self.WeightOfLastCadence = self.tryGetBeatStrength()
+                            self.verifyHCHarmony(self.CurrHarmonicState) and\
+                            self.verifySopranoVoiceLeading(cadence_type='HC'):
+                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.HCArrival, curr_state)
                     elif self.isTonicBass():
                         # harmony  - chordal inversion
-                        if (self.CurrHarmonicState.ChordInversion == CDHarmonicChordInversions.Root.value or self.isRootedHarmony()) and self.verifyPACGrouping(HarmonicState=self.CurrHarmonicState):
+                        if (self.CurrHarmonicState.ChordInversion == CDHarmonicChordInversions.Root.value or self.isRootedHarmony()) and\
+                                self.verifyPACGrouping(HarmonicState=self.CurrHarmonicState):
                             # ==I after V after IV or II6, cadential arrival
                             # melody  - soprano degree
-                            if self.isSopraneOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC'):
+                            if self.isSopranoOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC'):
                                 if curr_state==CDCadentialStates.CadInevitable:
-                                    curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival)
+                                    curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival, curr_state)
                                 elif self.verifySopranoVoiceLeading(cadence_type='IAC') and self.verifyIACGrouping(HarmonicState=self.CurrHarmonicState):
-                                    curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival)
-                            #sporano not on 1, either IAC or appoggiatura
-                            elif self.isSopraneOnDegree(3) and self.verifySopranoVoiceLeading(cadence_type='IAC') and self.verifyIACGrouping(HarmonicState=self.CurrHarmonicState):
-                                curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival)
+                                    curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival, curr_state)
+                            #soprano not on 1, either IAC or appoggiatura
+                            elif self.isSopranoOnDegree([3, 5]) and self.verifySopranoVoiceLeading(cadence_type='IAC') and self.verifyIACGrouping(HarmonicState=self.CurrHarmonicState):
+                                curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival, curr_state)
                             # expecting appoggiatura on strong beats
                             elif self.tryGetBeatStrength() >= 0.5 and self.verifyPACGrouping(self.CurrHarmonicState):
-                                curr_state = self.checkAppoggiatura(curr_state)
+                                curr_state = self.checkAppoggiaturaOrAvoidance('PAC' if curr_state==CDCadentialStates.CadInevitable else 'IAC')
                             # appogiatura can also not be detected as I
                         elif self.tryGetBeatStrength() >= 0.5 and self.verifyPACGrouping(self.CurrHarmonicState):
                             # expecting appogiaturas only on strongest beats (TBD - this might be overfit to haydn)
-                            curr_state = self.checkAppoggiatura(curr_state)
+                            curr_state = self.checkAppoggiaturaOrAvoidance('PAC' if curr_state==CDCadentialStates.CadInevitable else 'IAC')
                     # on strong beat: going from V to anything other than V or I is avoiding the cadence or bass appoggiatura
                     elif self.tryGetBeatStrength() >= 0.5 and self.verifyPACGrouping(self.CurrHarmonicState) and self.verifySopranoVoiceLeading(cadence_type='PAC'):
                         # expecting bass appogiaturas only on strongest beats
                         curr_state = self.checkBassAppoggiatura(curr_state)
                     elif not self.isDominantBass():
-                        curr_state = CDCadentialStates.CadAvoided
-
+                        if self.tryGetBeatStrength() >= 0.5:
+                            curr_state = CDCadentialStates.CadAvoided
+                        else:
+                            curr_state = CDCadentialStates.CadExpected
                 # on weaker beat (but not completely weak) leave this state if not dominant bass:
-                elif self.tryGetBeatStrength() > 0.25 and not self.isDominantBass():
+                elif self.tryGetBeatStrength() >= 0.1 and not self.isDominantBass() and not self.isLeadingToneBass():
                     # if we left dominant but not to I then cadence avoided, but could be HC so wait for V again - TBD, perhaps this avoidance goes further back
                     curr_state = CDCadentialStates.HCArrivalExpected
 
@@ -498,37 +607,68 @@ class CDStateMachine(object):
 
         elif curr_state == CDCadentialStates.HCArrivalExpected:
 
-            if self.CurrHarmonicState.ChordWithBassRests.isRest:
+            if self.isDominantBass(favor_by_part=True) and self.harmonyHasSeventh(self.CurrHarmonicState):
+                curr_state = CDCadentialStates.CadInevitable
+            elif self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio:
+                if self.isDominantBass(favor_by_part=True, HarmonicState=self.LastNonAlbertiHarmonicState) and\
+                        self.harmonyHasSeventh(self.CurrHarmonicState) and\
+                        not self.isDominantEmbellishment():
+                    curr_state = CDCadentialStates.CadInevitable
+                else:
+                    curr_state = curr_state
+            elif self.tryGetBeatStrength() < 0.5 and\
+                    self.isDominantBass(favor_by_part=True) and\
+                    self.isDominantHarmony(HarmonicState=self.CurrHarmonicState):#weak beat returning to dominant, return to cad inevitable
+                curr_state = CDCadentialStates.CadInevitable
+            elif self.CurrHarmonicState.ChordWithBassRests.isRest:
                 curr_state = CDCadentialStates.CadExpected
-
-            else:
-                if self.tryGetBeatStrength() < 0.5:
-                    if self.isDominantBass(favor_by_part=True):#weak beat returning to dominant, return to cad inevitable
-                        curr_state = CDCadentialStates.CadInevitable
-
-                else: #strong beats (TBD - syncopa?)
-
-                    if self.isDominantBass(favor_by_part=True) and (self.harmonyHasSeventh(self.CurrHarmonicState) or not self.verifyHCGrouping(self.CurrHarmonicState)): #V7 or V without grouping return to cad inevitable
-                        curr_state = CDCadentialStates.CadInevitable
-
-                    elif self.isDominantBass(favor_by_part=True) and\
-                            self.verifyHCGrouping(self.CurrHarmonicState)\
-                            and self.verifyNotI64(HarmonicState=self.CurrHarmonicState): # and self.CurrHarmonicState.ChordDegree == CDHarmonicChordDegrees.V.value and self.isRootedHarmony():# and self.harmonyHasThird():# V on strong beat while expecting - HC
-                        curr_state = CDCadentialStates.HCArrival
-                        self.WeightOfLastCadence = self.tryGetBeatStrength()
-
-                    elif self.isDominantBass(favor_by_part=True) and (self.tryGetBeatStrength() == 1.0 or self.harmonyHasTonic(self.CurrHarmonicState)):#appoggiatura on strongest beat, or if V64
-                         curr_state = CDCadentialStates.HCAppoggExpected
-
-                    elif not self.isDominantBass(): #strong beat and not dominant, cadence avoided
-                        curr_state = CDCadentialStates.CadAvoided
+            elif self.tryGetBeatStrength() >= 0.5: #strong beats
+                if self.isDominantBass(favor_by_part=True) and\
+                        (self.verifyHCGrouping(self.CurrHarmonicState, start_stop='any') or self.tryGetBeatStrength()==1) and\
+                        not self.isI64(HarmonicState=self.CurrHarmonicState) and\
+                        self.verifyHCHarmony(HarmonicState=self.CurrHarmonicState) and\
+                        self.verifySopranoVoiceLeading(cadence_type='HC'):
+                    curr_state = self.setCadenceOrPostCadence(CDCadentialStates.HCArrival, curr_state)
+                # appoggiatura on strongest beat, or if V64
+                elif self.isDominantBass(favor_by_part=True) and\
+                        (self.isI64(HarmonicState=self.CurrHarmonicState) and not self.isBassPartRest()) and\
+                        self.verifyHCGrouping(self.CurrHarmonicState, start_stop='any'):
+                    curr_state = CDCadentialStates.HCAppoggExpected
+                elif self.isDominantBass(favor_by_part=True) and\
+                        ((self.harmonyHasSeventh(self.CurrHarmonicState) and not self.isDominantEmbellishment()) or\
+                         not (self.verifyHCGrouping(self.CurrHarmonicState, start_stop='any') or self.tryGetBeatStrength()==1)): #V7 or V without grouping return to cad inevitable
+                    curr_state = CDCadentialStates.CadInevitable
+                elif self.isDominantBass(favor_by_part=True) and self.tryGetBeatStrength() == 1.0:#appoggiatura on strongest beat, or if V64
+                    curr_state = CDCadentialStates.HCAppoggExpected
+                elif not (self.isDominantBass() or self.isDominantEmbellishment()): #strong beat and not dominant or embellishment, cadence avoided
+                    curr_state = CDCadentialStates.CadAvoided
+                elif self.isDominantBass(favor_by_part=True) and self.verifyHCGrouping(HarmonicState=self.CurrHarmonicState, start_stop='any') and not self.harmonyHasSeventh(self.CurrHarmonicState):
+                    curr_state = CDCadentialStates.HCAppoggExpected
 
 
         elif curr_state == CDCadentialStates.PACAppoggExpected or curr_state == CDCadentialStates.BassAppoggExpected:
 
             if self.CurrHarmonicState.ChordWithBassRests.isRest or (self.tryGetBeatStrength() == 1): # and not self.isTonicBass()): # rest or new measure not on tonic, exit appoggiatura:
                 if self.isDominantBass():
-                    curr_state = CDCadentialStates.CadInevitable
+                    if (self.verifyHCGrouping(self.CurrHarmonicState, start_stop='any') or self.tryGetBeatStrength()==1) and\
+                            self.verifyHCHarmony(HarmonicState=self.CurrHarmonicState) and\
+                            self.verifySopranoVoiceLeading(cadence_type='HC'):
+                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.HCArrival, curr_state)
+                    elif self.isI64(self.CurrHarmonicState):  # I64 can be HC appoggiaturra on dominant bass
+                        curr_state = CDCadentialStates.HCAppoggExpected
+                    else:
+                        curr_state = CDCadentialStates.CadInevitable
+                elif self.isTonicBass() and\
+                        self.CurrHarmonicState.Chord.isConsonant() and\
+                        not self.harmonyContainsPitchDegree(HarmonicState=self.CurrHarmonicState, degree=6):
+                    if self.isSopranoOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC') and\
+                            (not self.IsChallenger or self.verifyPACGrouping(self.CurrHarmonicState)):
+                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival, curr_state)
+                    elif self.isSopranoOnDegree([3, 5]) and self.verifySopranoVoiceLeading(cadence_type='IAC') and\
+                            self.verifyIACGrouping(HarmonicState=self.CurrHarmonicState):
+                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival, curr_state)
+                    else:
+                        curr_state = CDCadentialStates.CadExpected
                 else:
                     curr_state = CDCadentialStates.CadExpected
             else:
@@ -536,31 +676,45 @@ class CDStateMachine(object):
             # ==for bass appoggiatura check  that soprano is still on tonic and that bass is also.
             # ==grouping is not required becuase it was verified on the appoggiatura entrance
             # ==in case of alberti or arppeggio the original bass on entrance remains, so tonic bass verification is not required.
-                if curr_state ==  CDCadentialStates.BassAppoggExpected and (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
+                if curr_state == CDCadentialStates.BassAppoggExpected and (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
                     curr_state = curr_state
-                elif self.isTonicBass() or (curr_state == CDCadentialStates.PACAppoggExpected and (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio)) and self.CurrHarmonicState.Chord.isConsonant() and not self.harmonyContainsPitchDegree(HarmonicState=self.CurrHarmonicState, degree=6):
-                    if self.isSopraneOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC') and (not self.IsChallenger or self.verifyPACGrouping(self.CurrHarmonicState)):
-                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival)
-                    elif self.isSopraneOnDegree(3) and self.verifySopranoVoiceLeading(cadence_type='IAC') and self.verifyIACGrouping(HarmonicState=self.CurrHarmonicState):
-                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival)
-                elif not (self.isSopraneOnDegree(1) or self.isDominantBass() or self.isMediantBass()):#continue the appogiattura if dominant or mediant bass
+                elif self.isTonicBass() or\
+                        (curr_state == CDCadentialStates.PACAppoggExpected and (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio)) and\
+                        self.CurrHarmonicState.Chord.isConsonant() and\
+                        not self.harmonyContainsPitchDegree(HarmonicState=self.CurrHarmonicState, degree=6):
+                    if self.isSopranoOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC') and\
+                            (not self.IsChallenger or self.verifyPACGrouping(self.CurrHarmonicState)):
+                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival, curr_state)
+                    elif self.isSopranoOnDegree(3) and self.verifySopranoVoiceLeading(cadence_type='IAC') and \
+                            self.verifyIACGrouping(HarmonicState=self.CurrHarmonicState):
+                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival, curr_state)
+                elif self.isDominantBass(favor_by_part=True) and\
+                        (self.verifyHCGrouping(self.CurrHarmonicState, start_stop='any') or self.tryGetBeatStrength()==1) and\
+                        self.verifyHCHarmony(HarmonicState=self.CurrHarmonicState) and\
+                        self.verifySopranoVoiceLeading(cadence_type='HC'):
+                    curr_state = self.setCadenceOrPostCadence(CDCadentialStates.HCArrival, curr_state)
+                elif not (self.isSopranoOnDegree(1) or self.isDominantBass() or self.isMediantBass()):#continue the appogiattura if dominant or mediant bass
+                    curr_state = CDCadentialStates.CadAvoided
+                elif (self.IsChallenger and self.verifyPACGrouping(self.CurrHarmonicState)):
                     curr_state = CDCadentialStates.CadAvoided
 
 
         elif curr_state == CDCadentialStates.IACAppoggExpected:
             # ==appoggiatura, check bass still on key and if soprano is root then PAC otherwise IAC
-            if self.isSecondaryDominantLeadingTone():
+            if self.isDominantEmbellishment() or (self.isI64(HarmonicState=self.CurrHarmonicState) and not self.isBassPartRest()):
                 curr_state = CDCadentialStates.HCArrivalExpected
             elif self.CurrHarmonicState.ChordWithBassRests.isRest or self.tryGetBeatStrength() == 1: # rest or new measure, exit appoggiatura
                 curr_state = CDCadentialStates.CadExpected
             else:
                 if self.isTonicBass():
-                    if ((self.isSopraneOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC')) or (self.isSopraneOnDegree([3, 5]) and self.verifySopranoVoiceLeading(cadence_type='IAC'))) and (not self.IsChallenger or self.verifyPACGrouping(self.CurrHarmonicState)):
+                    if ((self.isSopranoOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC')) or
+                        (self.isSopranoOnDegree([3, 5]) and self.verifySopranoVoiceLeading(cadence_type='IAC'))) and\
+                            (not self.IsChallenger or self.verifyPACGrouping(self.CurrHarmonicState)):
                         if self.CurrHarmonicState.Chord.isConsonant() and not self.harmonyContainsPitchDegree(HarmonicState=self.CurrHarmonicState, degree=6):
-                            curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival)
+                            curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival, curr_state)
                 elif self.isDominantBass(): # dominant bass, go to PAC appogiatura
-                    curr_state = self.checkAppoggiatura(curr_state)
-                elif not (self.isSopraneOnDegree(1) or self.isMediantBass()):#continue the appogiattura if dominant or mediant bass
+                    curr_state = self.checkAppoggiaturaOrAvoidance('PAC')
+                elif not (self.isSopranoOnDegree(1) or self.isMediantBass()):#continue the appogiattura if dominant or mediant bass
                     curr_state = CDCadentialStates.CadAvoided
 
 
@@ -569,24 +723,37 @@ class CDStateMachine(object):
             if self.CurrHarmonicState.ChordWithBassRests.isRest:
                 curr_state = CDCadentialStates.CadExpected
             else:
-                if self.isDominantBass(favor_by_part=True):
-                    if self.CurrHarmonicState.ChordDegree == CDHarmonicChordDegrees.V.value and self.harmonyHasSeventh(self.CurrHarmonicState): #V7, return to cad inevitable
-                        curr_state = CDCadentialStates.CadInevitable
-                    elif self.CurrHarmonicState.ChordDegree == CDHarmonicChordDegrees.V.value and\
-                            self.verifyNotI64(HarmonicState=self.CurrHarmonicState) and\
-                            self.verifyPACGrouping(HarmonicState=self.CurrHarmonicState):
-                        curr_state = CDCadentialStates.HCArrival
-                        self.WeightOfLastCadence = self.tryGetBeatStrength()
-                    elif self.tryGetBeatStrength() >= 0.5: # dominant and not HC, exit HC appoggiatura state
-                        curr_state = CDCadentialStates.CadInevitable
-                elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
+                if (self.isI64(HarmonicState=self.CurrHarmonicState) and not self.isBassPartRest()) or self.isDominantEmbellishment(): # stay in HC appogg as long as I64 or dominant embellishment
                     curr_state = curr_state
-                elif self.isTonicBass() and self.tryGetBeatStrength() >= 0.5 and self.verifyPACGrouping(HarmonicState=self.CurrHarmonicState) and self.verifySopranoVoiceLeading(cadence_type='PAC'):#PAC arrival can happen here
-                    if self.isSopraneOnDegree(1):
-                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival)
-                    elif (self.isSopraneOnDegree(3) or self.isSopraneOnDegree(5)) and self.verifySopranoVoiceLeading(cadence_type='IAC'):
-                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival)
-                else:
+                elif self.isDominantBass(favor_by_part=True) and\
+                        self.verifyHCHarmony(self.CurrHarmonicState) and\
+                        self.verifySopranoVoiceLeading(cadence_type='HC'):
+                    curr_state = self.setCadenceOrPostCadence(CDCadentialStates.HCArrival, curr_state)
+                #elif self.isDominantBass(favor_by_part=True) and\
+                #        (self.harmonyHasSeventh(self.CurrHarmonicState) or self.tryGetBeatStrength() >= 0.5): #V7 or strong beat, return to cad inevitable
+                #    curr_state = CDCadentialStates.CadInevitable
+                #elif self.harmonyContainsPitchDegree(HarmonicState=self.CurrHarmonicState, degree=4): #also V7
+                #    curr_state = CDCadentialStates.CadInevitable
+                elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
+                    # V7 in alberti
+                    if self.isDominantBass(favor_by_part=True, HarmonicState=self.LastNonAlbertiHarmonicState) and\
+                            self.harmonyHasSeventh(self.CurrHarmonicState) and\
+                            not self.isDominantEmbellishment():
+                        curr_state = CDCadentialStates.CadInevitable
+                    else:
+                        curr_state = curr_state
+                elif self.isTonicBass() and self.tryGetBeatStrength() >= 0.5 and\
+                        self.verifyPACGrouping(HarmonicState=self.CurrHarmonicState) and\
+                        self.isDominantHarmony(HarmonicState=self.PrevHarmonicState):
+                    if self.isSopranoOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC'):
+                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival, curr_state)
+                    elif self.isSopranoOnDegree([3, 5]) and self.verifySopranoVoiceLeading(cadence_type='IAC'):
+                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival, curr_state)
+                    else:
+                        curr_state = self.checkAppoggiaturaOrAvoidance('PAC')
+                elif self.tryGetBeatStrength() >= 0.25 and self.isDominantBass(favor_by_part=True) and (self.harmonyHasSeventh(self.CurrHarmonicState) or self.tryGetBeatStrength() >= 0.5): #V7 or strong beat, return to cad inevitable
+                    curr_state = CDCadentialStates.CadInevitable
+                elif not self.isDominantBass():
                     curr_state = CDCadentialStates.CadAvoided
 
         elif curr_state == CDCadentialStates.PACArrival or curr_state == CDCadentialStates.PCCArrival:
@@ -605,13 +772,13 @@ class CDStateMachine(object):
                 return
             else:
                 # soprano still on tonic
-                if self.isSopraneOnDegree(1):
+                if self.isSopranoOnDegree(1):
                     self.PACPending = False
                     self.exitPACState()
                     self.updateCadentialState()
                     return
                 elif self.tryGetBeatStrength() >= 0.25 and\
-                        (self.isSopraneOnDegree(3)) and\
+                        (self.isSopranoOnDegree(3)) and\
                         (self.CurrHarmonicState.Chord.isTriad() or
                          self.CurrHarmonicState.Chord.isIncompleteMajorTriad() or
                          self.CurrHarmonicState.Chord.isIncompleteMinorTriad()):
@@ -631,31 +798,49 @@ class CDStateMachine(object):
                             return
 
 
-        elif curr_state == CDCadentialStates.HCArrival:
-            if self.CurrHarmonicState.ChordWithBassRests.isRest or self.PrevHarmonicState.ChordWithBassRests.isRest:# a rest confirms the cadence
+        elif curr_state == CDCadentialStates.HCArrival or curr_state == CDCadentialStates.PCHArrival:
+            if self.CurrHarmonicState.ChordWithBassRests.isRest or self.PrevHarmonicState.ChordWithBassRests.isRest:# a full rest confirms the cadence
                 curr_state = CDCadentialStates.Idle if self.MinPostCadenceMeasures > 0 else CDCadentialStates.CadInevitable
             elif (self.CurrHarmonicState.Alberti or self.CurrHarmonicState.Arpeggio):
-                # if alberti and weak beat do nothing
-                curr_state = curr_state
+                # if alberti and weak beat verify still not V7
+                if self.harmonyContainsPitchDegree(HarmonicState=self.CurrHarmonicState, degree=4) and\
+                        self.isDominantBass(HarmonicState=self.LastNonAlbertiHarmonicState):
+                    curr_state = CDCadentialStates.CadInevitable
+                    self.RevertLastHC = True
+                    self.PostHCMeasureCounter = self.MinPostCadenceMeasuresHC
+                else: # stay in state for an other Alberti or arpeggio
+                    curr_state = curr_state
             else:
                 # == After HC we are still expecting a cadence, but we need to see how this does not create false positives
-                if self.isDominantBass():
-                    if self.harmonyHasSeventh(self.CurrHarmonicState): #V7, return to cad inevitable! (TBD - and cancel the previous HC??)
-                        curr_state = CDCadentialStates.CadInevitable
+                if self.isDominantBass() and self.harmonyHasSeventh(self.CurrHarmonicState): #V7, return to cad inevitable (and cancel the previous HC?)
+                    curr_state = CDCadentialStates.CadInevitable
+                    #if self.tryGetBeatStrength() <= 0.25: # this causes HC misses - example Haydn op.55,2,2 mm.34
+                    #    self.RevertLastHC = True
+                    #    self.PostHCMeasureCounter = self.MinPostCadenceMeasuresHC
+                #elif self.isSubDominantBass(): # V2, cancel previous HC
+                #    self.RevertLastHC = True
+                #    self.PostHCMeasureCounter = self.MinPostCadenceMeasuresHC
+                #    curr_state = CDCadentialStates.CadAvoided
                 # === very strict condition from HC to PAC
-                elif (self.isTonicBass() or self.isSopraneOnDegree(1)) and\
+                elif (self.isTonicBass() or self.isSopranoOnDegree(1)) and\
                         (self.tryGetBeatStrength() > self.WeightOfLastCadence or self.tryGetBeatStrength() > 0.25) and\
                         self.verifyPACGrouping(HarmonicState=self.CurrHarmonicState) and\
                         self.verifySopranoVoiceLeading(cadence_type='PAC'):
-                    if self.isTonicBass() and self.isSopraneOnDegree(1):
-                        curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival)
-                    elif self.isTonicBass():
-                        curr_state = self.checkAppoggiatura(curr_state=curr_state)
+                    if self.isTonicBass():
+                        if self.isSopranoOnDegree(1):
+                            curr_state = self.setCadenceOrPostCadence(CDCadentialStates.PACArrival, curr_state)
+                        elif self.isSopranoOnDegree(3):
+                            curr_state = self.setCadenceOrPostCadence(CDCadentialStates.IACArrival, curr_state)
+                        else:
+                            curr_state = self.checkAppoggiaturaOrAvoidance('PAC')
+                    elif self.isDominantBass() and self.isI64(HarmonicState=self.CurrHarmonicState):
+                        curr_state = CDCadentialStates.HCArrivalExpected
                     else:
                         curr_state = self.checkBassAppoggiatura(curr_state=curr_state)
-                    self.WeightOfLastCadence = 0
-                else:#bass has left domninant, go back to cad expected
+                elif not self.isDominantBass():#bass has left domninant, go back to cad expected
                     curr_state = CDCadentialStates.CadExpected
+                else:
+                    curr_state = curr_state
 
         #====set output to state and then set cadential arrivals back to idle state
         self.CurrCadentialOutput = curr_state
@@ -664,25 +849,31 @@ class CDStateMachine(object):
         #==must check for change for flow debugging
         self.checkStateChanged()
 
-    def checkAppoggiatura(self, curr_state):
-        if (curr_state == CDCadentialStates.CadInevitable or curr_state == CDCadentialStates.HCArrival) and \
+    def checkAppoggiaturaOrAvoidance(self, app_type='PAC'):
+        if app_type == 'PAC' and \
                 ((self.CurrHarmonicState.Key.mode == 'major' and self.isSopranoOnSemitonesFromTonic([11, 2, 4])) or
                  (self.CurrHarmonicState.Key.mode == 'minor' and self.isSopranoOnSemitonesFromTonic([10, 11, 2, 3]))):
             curr_state = CDCadentialStates.PACAppoggExpected
-        elif curr_state == CDCadentialStates.IACArrivalExpected and self.isSopranoOnSemitonesFromTonic([3, 5]) and self.verifyIACGrouping(HarmonicState=self.CurrHarmonicState):
+        elif app_type == 'IAC' and self.isSopranoOnSemitonesFromTonic([3, 5]) and self.verifyIACGrouping(HarmonicState=self.CurrHarmonicState):
             curr_state = CDCadentialStates.IACAppoggExpected
+        elif app_type == 'HC' and \
+                ((self.CurrHarmonicState.Key.mode == 'major' and self.isSopranoOnSemitonesFromTonic([0, 1, 4, 6, 9])) or
+                 (self.CurrHarmonicState.Key.mode == 'minor' and self.isSopranoOnSemitonesFromTonic([0, 1, 3, 6, 8]))):
+            curr_state = CDCadentialStates.HCAppoggExpected
         else:
             curr_state = CDCadentialStates.CadAvoided
         return curr_state
 
     def checkBassAppoggiatura(self, curr_state):
         if self.isDominantBass(favor_by_part=True) or self.isMediantBass(favor_by_part=True) or self.isBassPartRest():
-            if (curr_state == CDCadentialStates.CadInevitable or curr_state == CDCadentialStates.HCArrival) and self.isSopraneOnDegree(1):
+            if (curr_state in [CDCadentialStates.CadInevitable, CDCadentialStates.HCArrival, CDCadentialStates.PCHArrival]) and self.isSopranoOnDegree(1):
                 curr_state = CDCadentialStates.BassAppoggExpected
-            elif curr_state == CDCadentialStates.IACArrivalExpected and (self.isSopraneOnDegree([1, 2, 3]) or self.isLeadingToneSoprano()):
+            elif curr_state == CDCadentialStates.IACArrivalExpected and (self.isSopranoOnDegree([1, 2, 3]) or self.isLeadingToneSoprano()):
                 curr_state = CDCadentialStates.IACAppoggExpected
             elif curr_state == CDCadentialStates.IACArrivalExpected and (self.isSopranoAtSemitoneFromDegree(1, 3)):
                 curr_state = CDCadentialStates.IACAppoggExpected
+            elif self.isDominantBass(favor_by_part=True):
+                curr_state = CDCadentialStates.CadInevitable
             else:
                 curr_state = CDCadentialStates.CadAvoided
         else:
@@ -693,7 +884,7 @@ class CDStateMachine(object):
         if self.PACPending:
             self.CurrCadentialState = CDCadentialStates.CadExpected
             self.RevertLastPAC = True
-            self.PostCadenceMeasureCounter = self.MinPostCadenceMeasures #set the counter high to catch the next cadence
+            self.PostPACMeasureCounter = self.MinPostCadenceMeasures #set the counter high to catch the next cadence
         else:
             # move to idle (confirming the PAC) and call update state again
             if self.MinPostCadenceMeasures > 0:
@@ -706,19 +897,28 @@ class CDStateMachine(object):
 
     def updateCounters(self):
         #beat strenth==1 means new measure
-        if self.tryGetBeatStrength()==1:
-            self.PostCadenceMeasureCounter = self.PostCadenceMeasureCounter + 1
-            self.MeasureCounter = self.MeasureCounter + 1
+        if self.tryGetBeatStrength() == 1:
+            self.PostPACMeasureCounter += 1
+            self.PostHCMeasureCounter += 1
+            self.MeasureCounter += 1
 
-    def setCadenceOrPostCadence(self,Cadence):
-        if Cadence==CDCadentialStates.PACArrival and self.PostCadenceMeasureCounter < self.MinPostCadenceMeasures:
-            state = CDCadentialStates.PCCArrival
-        elif self.MeasureCounter <= self.MinInitialMeasures:
-            state = CDCadentialStates.IACArrival
+    def setCadenceOrPostCadence(self, cadence=None, state=None, verify_beat_strength=True):
+        if not verify_beat_strength or self.tryGetBeatStrength() >= 0.125:
+            if self.MeasureCounter >= self.MinInitialMeasures[cadence]:
+                if cadence == CDCadentialStates.PACArrival and self.PostPACMeasureCounter < self.MinPostCadenceMeasures:
+                    state = CDCadentialStates.PCCArrival
+                elif cadence == CDCadentialStates.HCArrival and self.PostHCMeasureCounter < self.MinPostCadenceMeasuresHC:
+                    state = CDCadentialStates.PCHArrival
+                else:
+                    state = cadence
+            else: # too early, return to cadence expected again
+                state = CDCadentialStates.CadExpected
+            if state == CDCadentialStates.HCArrival or state == CDCadentialStates.PCHArrival:
+                self.WeightOfLastCadence = self.tryGetBeatStrength()
+            self.SopranoOfLastCadence = self.getCurrSopranoPitch()
+            self.HarmonicStateOfLastCadence = copy.deepcopy(self.CurrHarmonicState)
         else:
-            state = Cadence
-        self.SopranoOfLastCadence = self.getCurrSopranoPitch()
-        self.HarmonicStateOfLastCadence = copy.deepcopy(self.CurrHarmonicState)
+            state = state
         return state
 
     def getCadentialOutput(self):
@@ -735,6 +935,8 @@ class CDStateMachine(object):
                 Lyric = str("IAC")
             elif self.getCadentialOutput() == CDCadentialStates.HCArrival:
                 Lyric = str("HC")
+            elif self.getCadentialOutput() == CDCadentialStates.PCHArrival:
+                Lyric = str("PCH")
             elif self.getCadentialOutput() == CDCadentialStates.CadAvoided:
                 Lyric = str("CA")
             elif not (self.getCadentialOutput() == CDCadentialStates.Idle):
@@ -757,6 +959,16 @@ class CDStateMachine(object):
     def getRevertLastPACAndReset(self):
         retVal = self.RevertLastPAC
         self.RevertLastPAC = False
+        return retVal
+
+    def getRevertLastHCAndReset(self):
+        retVal = self.RevertLastHC
+        self.RevertLastHC = False
+        return retVal
+
+    def getRevertLastIACAndReset(self):
+        retVal = self.RevertLastIAC
+        self.RevertLastIAC = False
         return retVal
 
 
