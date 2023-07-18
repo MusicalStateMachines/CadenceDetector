@@ -131,8 +131,8 @@ def plot_temporal_pos_per_mov(mov_str, table_diachronically_sorted):
         plt.xlabel('K. Mv.', size=12)
     plt.ylabel('Cadence Temporal Position %', size=12)
     plt.title(f'{CadenceString} Temporal Positions in {TestData.Label} Diachronically Sorted', size=14)
-    plt.show()
     plt.savefig(f'{CadenceString} Temporal Positions Per Movement {TestData.Label}.png')
+    plt.show()
 
 
 #=======Main script=========
@@ -169,9 +169,10 @@ ABCData.Composer = "Beethoven"
 # ==================================
 # set which database to compare to
 # ==================================
-TestData = DCMData
+TestData = ABCData
 optimize_false_positives = False
-CadenceString = "HC"
+CadenceString = "PAC"
+filter_movements = None #['284-3','331-1','570-1']
 
 # set state machine data
 StateMachineData = LabeledData()
@@ -196,10 +197,10 @@ def get_full_list_with_ending(root_dir, file_ending, string_filter = None):
     full_list = [os.path.join(root_dir, subdir, file)
                  for subdir, dirs, files in os.walk(root_dir)
                  for file in files
-                 if os.path.splitext(file)[-1] in file_ending and (not string_filter or string_filter in file)]
+                 if os.path.splitext(file)[-1] in file_ending and (not string_filter or not any(s in file for s in string_filter))]
     return full_list
 
-full_list = sorted(get_full_list_with_ending(TestData.DataPath, TestData.LabelFileEnding))
+full_list = sorted(get_full_list_with_ending(TestData.DataPath, TestData.LabelFileEnding, string_filter=filter_movements))
 
 for labelled_fp in sorted(full_list):
     labelled_file = os.path.split(labelled_fp)[-1]
@@ -317,7 +318,7 @@ plot_temporal_pos_per_mov(mv_str, diachronically_sorted_predictions)
 # writing to latex
 now = datetime.now()
 current_time = now.strftime("%Y_%m_%d_%H_%M_%S")
-write_dir = os.path.join(StateMachineData.DataPath, os.pardir, 'Results', TestData.Label)
+write_dir = os.path.join(StateMachineData.DataPath, os.pardir, 'Results', TestData.Label, CadenceString)
 os.makedirs(write_dir,exist_ok=True)
 
 # write full table in latex format

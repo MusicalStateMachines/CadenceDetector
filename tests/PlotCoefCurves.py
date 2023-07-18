@@ -6,7 +6,7 @@ import numpy as np
 from itertools import cycle
 
 cadence_sensitive_string = 'Cadence Sensitive'
-coefs_file = f"/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/K332-2_xml_Coefs_CDKeyDetectionModes.KSWithSmoothing{cadence_sensitive_string.replace(' ','')}.txt"
+coefs_file = f"/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/K281-2_xml_Coefs_CDKeyDetectionModes.KSWithSmoothing{cadence_sensitive_string.replace(' ','')}.txt"
 with open(coefs_file, 'rb') as f:
     coefs = pickle.load(f)
 
@@ -16,8 +16,8 @@ colors = plt.cm.tab20b(np.linspace(0,1,len(df.keys())))
 lines = ["-","--","-.",":"]
 linecycler = cycle(lines)
 measure_from = 1
-measure_to = len(df['C'])
-plot_keys = ['B-','b-','F']
+measure_to = 26#len(df['C'])
+plot_keys = ['B-','E-']
 labels=[]
 for i,key in enumerate(df.keys()):
     if 'all' in plot_keys or key in plot_keys:

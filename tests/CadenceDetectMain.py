@@ -10,29 +10,29 @@ SearsHaydnPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
 DCMLabMozartPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml'
 DCMBeethovenPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data/mxl'
 MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
+# for running on files not in database
+TestPath = "/Users/matanba/Dropbox/PhD/CadencesResearch/TestData/"
 
 # select analysis path
-InputFilePath = DCMLabMozartPath
-OutputFilePath = MyPath
+InputFilePath = DCMBeethovenPath
+OutputFilePath = MyPath if InputFilePath != TestPath else os.path.join(InputFilePath, "StateMachineData/")
 
 # select files
 # all files in path
-XMLFileEnding = ".xml"
-# haydn singe file
-# XMLFileEnding = "op017_no04_mv01.xml"
-# mozart single file
-XMLFileEnding = "457-2.xml"
+XMLFileEnding = ".xml" if InputFilePath != DCMBeethovenPath else ".mxl"
+# ===for testing haydn singe file
+# XMLFileEnding = "op055_no02_mv02.xml"
+# ===for testing mozart single file
 # XMLFileEnding = "331-1.xml"
-# beethoven single file1
-# XMLFileEnding = "op130_no13_mov6.mxl"
+# XMLFileEnding = "279-2.xml"
+# ===for testing beethoven single file
+# XMLFileEnding = "op18_no1_mov2.xml"
+# ===for testing a single file not in database
+# XMLFileEnding = "al_p69_1_1-82.mxl"
 # multi-core processing
 DoParallelProcessing = XMLFileEnding in ['.xml', '.mxl']
 
-#===for testing a single file not in database
-#TestPath = "/Users/matanba/Dropbox/PhD/CadencesResearch/TestData/"
-#XMLFileEnding = "son333_1.mxl"
-#InputFilePath = TestPath
-#OutputFilePath = os.path.join(InputFilePath, "StateMachineData/")
+
 
 os.makedirs(OutputFilePath, exist_ok=True)
 TextFileEnding = ".txt"
@@ -46,16 +46,17 @@ OnlyGetNumMeasures = False
 # Cadence Detector Tunable Parameters
 MaxNumMeasures = 500
 MinInitialMeasures = 3
-MinPostCadenceMeasuresDict = {SearsHaydnPath: 2, DCMLabMozartPath: 0, DCMBeethovenPath: 0}
+MinPostCadenceMeasuresDict = {SearsHaydnPath: 2, DCMLabMozartPath: 0, DCMBeethovenPath: 0, TestPath: 3}
 MinPostCadenceMeasures = MinPostCadenceMeasuresDict[InputFilePath]
 KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
 KeyDetectionBlockSize = 4 # in measures
 KeyDetectionOverlap = 1 / KeyDetectionBlockSize  # ratio from block size, this creates an step size of 1 measure
 KeyDetectionLookAhead = 0.5 # percentage from block size
 KeyDetectionForgetFactor = 0.8
-ReenforcementFactorsDict = {SearsHaydnPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2},
+ReenforcementFactorsDict = {SearsHaydnPath: {'PAC': 2, 'IAC': 1, 'HC': 2},
                             DCMLabMozartPath: {'PAC': 3, 'IAC': 1, 'HC': 3/2},
-                            DCMBeethovenPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2}}
+                            DCMBeethovenPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2},
+                            TestPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2}}
 ReenforcementFactors = ReenforcementFactorsDict[InputFilePath]
 
 
@@ -72,7 +73,7 @@ def findCadencesInFile(file, only_get_num_measures = False):
                                  keyDetectionMode=KeyDetectionMode,
                                  keyDetectionLookahead=KeyDetectionLookAhead,
                                  keyDetectionForgetFactor=KeyDetectionForgetFactor,
-                                 reenforcementFactors=ReenforcementFactors,
+                                 reinforcementFactors=ReenforcementFactors,
                                  keyDetectionBlockSize=KeyDetectionBlockSize,
                                  keyDetectionOverlap=KeyDetectionOverlap)
             if only_get_num_measures:
