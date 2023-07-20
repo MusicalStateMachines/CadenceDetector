@@ -340,6 +340,23 @@ class CDStateMachine(object):
     def verifyHCHarmony(self, HarmonicState):
         return self.isVMajorExclusive(HarmonicState)
 
+    def isTonicHarmony(self, HarmonicState):
+        retVal = 1
+        IpitchClass = self.CurrHarmonicState.Key.tonic.pitchClass
+        if HarmonicState.Key.mode == 'major':
+            # major triad
+            tonic_triad_offsets = [0, 4, 7]
+        else:
+            # minor triad
+            tonic_triad_offsets = [0, 3, 7]
+        IchordPitchClass = [(IpitchClass + mto) % 12 for mto in tonic_triad_offsets]
+        if not HarmonicState.Chord.isRest:
+            for p in HarmonicState.Chord.pitches:
+                if p.pitchClass not in IchordPitchClass:
+                    retVal = 0
+                    break
+        return retVal
+
     def isUnison(self):
         retVal = 1
         Pitch0 = self.CurrHarmonicState.Chord.pitches[0].pitchClass
@@ -574,7 +591,9 @@ class CDStateMachine(object):
                         curr_state = self.setCadenceOrPostCadence(CDCadentialStates.HCArrival, curr_state)
                     elif self.isTonicBass():
                         # harmony  - chordal inversion
-                        if (self.CurrHarmonicState.ChordInversion == CDHarmonicChordInversions.Root.value or self.isRootedHarmony()) and\
+                        if (self.CurrHarmonicState.ChordInversion == CDHarmonicChordInversions.Root.value or
+                            self.isRootedHarmony() or
+                            self.isTonicHarmony(HarmonicState=self.CurrHarmonicState)) and\
                                 self.verifyPACGrouping(HarmonicState=self.CurrHarmonicState):
                             # ==I after V after IV or II6, cadential arrival
                             # melody  - soprano degree
@@ -682,7 +701,7 @@ class CDStateMachine(object):
                     else:
                         curr_state = CDCadentialStates.CadInevitable
                 elif self.isTonicBass() and\
-                        self.CurrHarmonicState.Chord.isConsonant() and\
+                        (self.CurrHarmonicState.Chord.isConsonant() or self.isTonicHarmony(HarmonicState=self.CurrHarmonicState)) and\
                         not self.harmonyContainsPitchDegree(HarmonicState=self.CurrHarmonicState, degree=6):
                     if self.isSopranoOnDegree(1) and self.verifySopranoVoiceLeading(cadence_type='PAC') and\
                             (not self.IsChallenger or self.verifyPACGrouping(self.CurrHarmonicState)):

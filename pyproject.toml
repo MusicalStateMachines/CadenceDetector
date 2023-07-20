@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "cadence_detector"
-version = "0.2.1"
+version = "0.2.3"
 authors = [
   { name="Matan Ben-Asher", email="mbenasher@yahoo.com" },
 ]
