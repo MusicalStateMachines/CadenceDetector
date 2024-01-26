@@ -5,32 +5,33 @@ import os
 import time
 import multiprocessing as mp
 
-DownloadsPath = '/Users/matanba/Downloads/'
-SearsHaydnPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
-DCMLabMozartPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml'
-DCMBeethovenPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data/mxl'
-MyPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
+HomeDir = os.path.expanduser("~")
+DownloadsPath = os.path.join(HomeDir,'Downloads')
+SearsHaydnPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/SearsData')
+DCMLabMozartPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml')
+DCMBeethovenPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data/mxl')
+MyPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/StateMachineData')
 # for running on files not in database
-TestPath = "/Users/matanba/Dropbox/PhD/CadencesResearch/TestData/"
+TestPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/TestData')
 
 # select analysis path
-InputFilePath = DCMBeethovenPath
+InputFilePath = DCMLabMozartPath
 OutputFilePath = MyPath if InputFilePath != TestPath else os.path.join(InputFilePath, "StateMachineData/")
 
 # select files
 # all files in path
 XMLFileEnding = ".xml" if InputFilePath != DCMBeethovenPath else ".mxl"
 # ===for testing haydn singe file
-# XMLFileEnding = "op055_no02_mv02.xml"
+# XMLFileEnding = "op020_no05_mv01.mid"
 # ===for testing mozart single file
-# XMLFileEnding = "331-1.xml"
+XMLFileEnding = "533-3.xml"
 # XMLFileEnding = "279-2.xml"
 # ===for testing beethoven single file
 # XMLFileEnding = "op18_no1_mov2.xml"
 # ===for testing a single file not in database
 # XMLFileEnding = "al_p69_1_1-82.mxl"
 # multi-core processing
-DoParallelProcessing = XMLFileEnding in ['.xml', '.mxl']
+DoParallelProcessing = XMLFileEnding in ['.xml', '.mxl', '.mid']
 
 
 
