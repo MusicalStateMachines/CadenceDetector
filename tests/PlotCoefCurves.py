@@ -5,8 +5,9 @@ import os
 import numpy as np
 from itertools import cycle
 
+HomeDir = os.path.expanduser("~") if os.name != 'nt' else os.environ['USERPROFILE']
 cadence_sensitive_string = 'Cadence Sensitive'
-coefs_file = f"/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/K281-2_xml_Coefs_CDKeyDetectionModes.KSWithSmoothing{cadence_sensitive_string.replace(' ','')}.txt"
+coefs_file = os.path.join(HomeDir,f"Dropbox/PhD/CadencesResearch/StateMachineData/K281-2_xml_Coefs_CDKeyDetectionModes.KSWithSmoothing{cadence_sensitive_string.replace(' ','')}.txt")
 with open(coefs_file, 'rb') as f:
     coefs = pickle.load(f)
 
