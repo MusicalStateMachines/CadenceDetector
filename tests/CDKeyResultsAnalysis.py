@@ -4,7 +4,8 @@ import pickle
 from src.cadence_detector.CadenceDetectData import *
 
 # set paths
-DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
+HomeDir = os.path.expanduser("~") if os.name != 'nt' else os.environ['USERPROFILE']
+DataPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/StateMachineData/')
 DataFileBeginning = f"haydn_op020_no03_mv04"
 DataFileBeginning = f"haydn"
 LabeledFileEnding = f"{CDKeyDetectionModes.FromFile}.txt"

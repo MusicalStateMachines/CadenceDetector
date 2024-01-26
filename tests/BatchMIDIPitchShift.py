@@ -5,8 +5,9 @@ import multiprocessing as mp
 import copy
 import tqdm
 
-InputPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml/'
-OutputPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml/PitchShifted/'
+HomeDir = os.path.expanduser("~") if os.name != 'nt' else os.environ['USERPROFILE']
+InputPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml')
+OutputPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml/PitchShifted')
 if not os.path.exists(OutputPath):
     os.mkdir(OutputPath)
 XMLFileEnding = '.xml'

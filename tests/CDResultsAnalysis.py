@@ -135,9 +135,11 @@ def plot_temporal_pos_per_mov(mov_str, table_diachronically_sorted):
     plt.show()
 
 
+HomeDir = os.path.expanduser("~") if os.name != 'nt' else os.environ['USERPROFILE']
+
 #=======Main script=========
 SearsData = LabeledData()
-SearsData.DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/SearsData/'
+SearsData.DataPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/SearsData')
 SearsData.DataFileEnding = ".xml"
 SearsData.LabelFileEnding = ".txt"
 SearsData.PACMeasureIndex = 2
@@ -147,7 +149,7 @@ SearsData.Label = "Haydn String Quartets"
 SearsData.Composer = "Haydn"
 
 DCMData = LabeledData()
-DCMData.DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/cadences'
+DCMData.DataPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/cadences')
 DCMData.DataFileEnding = ".xml"
 DCMData.LabelFileEnding = '.tsv'
 DCMData.PACMeasureIndex = 1
@@ -157,7 +159,7 @@ DCMData.Label = "Mozart Piano Sonatas"
 DCMData.Composer = "Mozart"
 
 ABCData = LabeledData()
-ABCData.DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data/tsv'
+ABCData.DataPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data/tsv')
 ABCData.DataFileEnding = ".mxl"
 ABCData.LabelFileEnding = ".tsv"
 ABCData.PACMeasureIndex = [] # no labelled cadences in beethoven path
@@ -169,14 +171,14 @@ ABCData.Composer = "Beethoven"
 # ==================================
 # set which database to compare to
 # ==================================
-TestData = ABCData
+TestData = SearsData
 optimize_false_positives = False
 CadenceString = "PAC"
 filter_movements = None #['284-3','331-1','570-1']
 
 # set state machine data
 StateMachineData = LabeledData()
-StateMachineData.DataPath = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
+StateMachineData.DataPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/StateMachineData')
 StateMachineData.PACMeasureIndex = 1
 StateMachineData.LabelFileEnding = f"{TestData.DataFileEnding.replace('.', '_')}_Analyzed.txt"
 
@@ -380,7 +382,7 @@ if TestData.PACMeasureIndex:
     print('false cadences:', max_row_false[3])
     print(max_row_both[0])
     print('missed:', max_row_both[4], 'false:', max_row_both[3])
-    path = '/Users/matanba/Dropbox/PhD/CadencesResearch/StateMachineData/'
+    path = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/StateMachineData')
 
     file_to_open = max_row_false[0] if optimize_false_positives else max_row_misses[0]
     full_path = os.path.join(path, file_to_open.replace(' ', '_'))

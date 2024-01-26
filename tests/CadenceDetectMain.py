@@ -5,7 +5,7 @@ import os
 import time
 import multiprocessing as mp
 
-HomeDir = os.path.expanduser("~")
+HomeDir = os.path.expanduser("~") if os.name != 'nt' else os.environ['USERPROFILE']
 DownloadsPath = os.path.join(HomeDir,'Downloads')
 SearsHaydnPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/SearsData')
 DCMLabMozartPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml')
