@@ -7,7 +7,7 @@ from itertools import cycle
 
 HomeDir = os.path.expanduser("~") if os.name != 'nt' else os.environ['USERPROFILE']
 cadence_sensitive_string = 'Cadence Sensitive'
-coefs_file = os.path.join(HomeDir,f"Dropbox/PhD/CadencesResearch/StateMachineData/K281-2_xml_Coefs_CDKeyDetectionModes.KSWithSmoothing{cadence_sensitive_string.replace(' ','')}.txt")
+coefs_file = os.path.join(HomeDir,f"Dropbox/PhD/CadencesResearch/StateMachineData/BWV_0847b_mxl_Coefs_CDKeyDetectionModes.KSWithSmoothing{cadence_sensitive_string.replace(' ','')}.txt")
 with open(coefs_file, 'rb') as f:
     coefs = pickle.load(f)
 
@@ -18,7 +18,7 @@ lines = ["-","--","-.",":"]
 linecycler = cycle(lines)
 measure_from = 1
 measure_to = 26#len(df['C'])
-plot_keys = ['B-','E-']
+plot_keys = ['all'] #['B-','E-']
 labels=[]
 for i,key in enumerate(df.keys()):
     if 'all' in plot_keys or key in plot_keys:

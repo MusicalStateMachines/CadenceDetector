@@ -7,14 +7,16 @@ import numpy as np
 
 class LabeledData:
     def __init__(self):
-        self.DataPath = []
-        self.DataFileEnding = []
-        self.LabelFileEnding = []
-        self.PACMeasureIndex = []
-        self.RowSearchString = []
-        self.TotalNumMeasures = []
-        self.Label = []
-        self.Composer = []
+        self.DataPath = ''
+        self.DataFileEnding = ''
+        self.OutputSubpath = ''
+        self.LabelFileEnding = ''
+        self.PACMeasureIndex = -1
+        self.RowSearchString = ''
+        self.TotalNumMeasures = 0
+        self.Name = ''
+        self.isLabelled = False
+        self.Composer = ''
 
 def write_table_to_latex(table, file_full_path, comment=None):
     text_file_results = open(file_full_path, "w")
@@ -52,6 +54,8 @@ def compute_classification_scores():
     return ClassificationResultsTable
 
 def diachronic_sort(input_table):
+    table_diachronically_sorted = []
+    mov_str= []
     if TestData == SearsData:
         table_diachronically_sorted = sorted([[int(row[0].split(' ')[1].split('op')[1]),
                                                int(row[0].split(' ')[2].split('no')[1]),
@@ -69,6 +73,11 @@ def diachronic_sort(input_table):
                                                int(row[0].split(' ')[2].split('mov')[1].split('.')[0]),
                                                row[1], row[2], row[3]] for row in input_table])
         mov_str = [str(row[:3]) for row in table_diachronically_sorted]
+    elif TestData == WTCData:
+        table_diachronically_sorted = sorted([[int(row[0].split('BWV ')[1].split(' ')[0]),
+                                               row[1], row[2], row[3]] for row in input_table])
+        mov_str = [str(row[0]) for row in table_diachronically_sorted]
+
     print('========Diachronically Sorted Table:==========')
     for row in table_diachronically_sorted:
         print(row)
@@ -92,9 +101,9 @@ def plot_diachronic_analysis(mov_str, table_diachronically_sorted):
     elif TestData == DCMData:
         plt.xlabel('K. Mv.', size=12)
     plt.ylabel('PAC Density %', size=12)
-    plt.title(f'{CadenceString} Density per Movement in {TestData.Label} Diachronically Sorted', size=14)
+    plt.title(f'{CadenceString} Density per Movement in {TestData.Name} Diachronically Sorted', size=14)
     plt.show(block=False)
-    plt.savefig(f'{CadenceString} Density Per Movement {TestData.Label}.png')
+    plt.savefig(f'{CadenceString} Density Per Movement {TestData.Name}.png')
 
 def plot_temporal_historgam(temporal_cadence_list):
     _, ax = plt.subplots(figsize=(15, 8))
@@ -106,10 +115,10 @@ def plot_temporal_historgam(temporal_cadence_list):
     smooth_counts = np.interp(bins_high_res, bin_centers, smooth_counts)
     ax.plot(bins_high_res, smooth_counts, '--k')
     plt.xlim([0,1])
-    plt.title(f'Temporal Position Distribution of {CadenceString}s in {TestData.Label}', size=14)
+    plt.title(f'Temporal Position Distribution of {CadenceString}s in {TestData.Name}', size=14)
     plt.xlabel('Time % in Movement', size=12)
     plt.ylabel('Cadence Count', size=12)
-    plt.savefig(f'Temporal Position Distribution of {CadenceString}s {TestData.Label}.png')
+    plt.savefig(f'Temporal Position Distribution of {CadenceString}s {TestData.Name}.png')
     plt.show(block=False)
 
 def plot_temporal_pos_per_mov(mov_str, table_diachronically_sorted):
@@ -130,8 +139,8 @@ def plot_temporal_pos_per_mov(mov_str, table_diachronically_sorted):
     elif TestData == DCMData:
         plt.xlabel('K. Mv.', size=12)
     plt.ylabel('Cadence Temporal Position %', size=12)
-    plt.title(f'{CadenceString} Temporal Positions in {TestData.Label} Diachronically Sorted', size=14)
-    plt.savefig(f'{CadenceString} Temporal Positions Per Movement {TestData.Label}.png')
+    plt.title(f'{CadenceString} Temporal Positions in {TestData.Name} Diachronically Sorted', size=14)
+    plt.savefig(f'{CadenceString} Temporal Positions Per Movement {TestData.Name}.png')
     plt.show()
 
 
@@ -140,33 +149,51 @@ HomeDir = os.path.expanduser("~") if os.name != 'nt' else os.environ['USERPROFIL
 #=======Main script=========
 SearsData = LabeledData()
 SearsData.DataPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/SearsData')
+SearsData.OutputSubpath = "SearsHaydn"
 SearsData.DataFileEnding = ".xml"
 SearsData.LabelFileEnding = ".txt"
 SearsData.PACMeasureIndex = 2
 SearsData.RowSearchString = "Cadence Category"
 SearsData.TotalNumMeasures = 0 # computed from files
-SearsData.Label = "Haydn String Quartets"
+SearsData.Name = "Haydn String Quartets"
 SearsData.Composer = "Haydn"
+SearsData.isLabelled = True
 
 DCMData = LabeledData()
 DCMData.DataPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/cadences')
+DCMData.OutputSubpath = "DCMLabMozart"
 DCMData.DataFileEnding = ".xml"
 DCMData.LabelFileEnding = '.tsv'
 DCMData.PACMeasureIndex = 1
 DCMData.RowSearchString = "cadence"
 DCMData.TotalNumMeasures = 0 # computed from files
-DCMData.Label = "Mozart Piano Sonatas"
+DCMData.Name = "Mozart Piano Sonatas"
 DCMData.Composer = "Mozart"
+DCMData.isLabelled = True
 
 ABCData = LabeledData()
 ABCData.DataPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data/tsv')
+ABCData.OutputSubpath = "DCMLabBeethoven"
 ABCData.DataFileEnding = ".mxl"
 ABCData.LabelFileEnding = ".tsv"
 ABCData.PACMeasureIndex = [] # no labelled cadences in beethoven path
 ABCData.RowSearchString = []
 ABCData.TotalNumMeasures = 0 # computed from files
-ABCData.Label = "Beethoven String Quartets"
+ABCData.Name = "Beethoven String Quartets"
 ABCData.Composer = "Beethoven"
+ABCData.isLabelled = False
+
+WTCData = LabeledData()
+WTCData.DataPath = os.path.join(HomeDir,'/Dropbox/PhD/CadencesResearch/BachWTC/algomus-data-master/fugues')
+WTCData.OutputSubpath = "BachWTC"
+WTCData.DataFileEnding = ".mxl"
+WTCData.LabelFileEnding = ""
+WTCData.PACMeasureIndex = 0
+WTCData.RowSearchString = "cadences"
+WTCData.TotalNumMeasures = 0 # computed from files
+WTCData.Name = "Bach Well Tempered Clavier Book 1 Fugues"
+WTCData.Composer = "Bach"
+WTCData.isLabelled = True
 
 # ==================================
 # set which database to compare to
@@ -178,7 +205,7 @@ filter_movements = None #['284-3','331-1','570-1']
 
 # set state machine data
 StateMachineData = LabeledData()
-StateMachineData.DataPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/StateMachineData')
+StateMachineData.DataPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/StateMachineData', TestData.OutputSubpath)
 StateMachineData.PACMeasureIndex = 1
 StateMachineData.LabelFileEnding = f"{TestData.DataFileEnding.replace('.', '_')}_Analyzed.txt"
 
@@ -202,25 +229,73 @@ def get_full_list_with_ending(root_dir, file_ending, string_filter = None):
                  if os.path.splitext(file)[-1] in file_ending and (not string_filter or not any(s in file for s in string_filter))]
     return full_list
 
-full_list = sorted(get_full_list_with_ending(TestData.DataPath, TestData.LabelFileEnding, string_filter=filter_movements))
 
-for labelled_fp in sorted(full_list):
-    labelled_file = os.path.split(labelled_fp)[-1]
+import re
+def parse_cadences_from_work(analysis_text):
+    cadences = []
+    in_cadences_section = False
+    for line in analysis_text.split('\n'):
+        line = line.strip()
+        # Check if it's the start of the cadences section
+        if line.startswith('== cadences'):
+            in_cadences_section = True
+        elif in_cadences_section and line.startswith('*'):
+            # Process cadence lines
+            matches = re.finditer(r'(\d+(\.\d+)?)\s+\(([^)]+)\)', line)
+            for match in matches:
+                measure, _, cadence_type = match.groups()
+                cadences.append({'measure': float(measure), 'cadence': cadence_type})
+    return cadences
+
+
+def parse_bach_fugue_cadences_from_file(file_path):
+    all_data = []
+    with open(file_path, 'r') as file:
+        current_data = None
+        current_occurrence = ''
+        for line in file:
+            line = line.strip()
+            # Check if it's the start of a new occurrence
+            if line.startswith('==== wtc-i'):
+                if current_data:
+                    current_data['cadences'] = parse_cadences_from_work(current_occurrence)
+                    all_data.append(current_data)
+                current_data = {'work': line[4:].strip()}
+                current_occurrence = line + '\n'
+            elif current_data is not None:
+                # Check for the end of the current occurrence
+                if line.startswith('=='):
+                    current_occurrence += line + '\n'
+                else:
+                    current_occurrence += line + '\n'
+    # Process the last occurrence after the loop
+    if current_data:
+        current_data['cadences'] = parse_cadences_from_work(current_occurrence)
+        all_data.append(current_data)
+
+    return all_data
+
+
+if TestData == WTCData:
+    file_path = r"/Users/matanba/Dropbox/PhD/CadencesResearch/BachWTC/algomus-data-master/fugues/fugues.ref"  # Replace with your actual file path
+    full_list = parse_bach_fugue_cadences_from_file(file_path)
+else:
+    full_list = sorted(get_full_list_with_ending(TestData.DataPath, TestData.LabelFileEnding, string_filter=filter_movements))
+
+for labelled_fp in full_list:
+    labelled_file = os.path.split(labelled_fp)[-1] if TestData is not WTCData else labelled_fp['work']
     if labelled_file.endswith(TestData.LabelFileEnding):
         # define path for Test Data
         print(f"Analyzing {labelled_file}")
-
         CurrTestCadences = []
         CurrStateMachineCadences = []
         CurrStateMachineCadencesTemporalPercent = []
         CurrFalsePositives = []
         CurrFalseNegatives = []
-
         # find test cadences (if they exist)
         if TestData.PACMeasureIndex:
             with open(labelled_fp, 'r') as f:
                 lines = f.readlines()
-
                 FoundRow = 0
                 for line in lines:
                     if FoundRow == 0:
@@ -234,8 +309,20 @@ for labelled_fp in sorted(full_list):
                             CurrTestCadences.append(int(elements[TestData.PACMeasureIndex]))
                             # print(line, file=text_file_reduced)
 
+        else:
+            data = labelled_fp['cadences']
+            for cad in data:
+                if CadenceString in cad['cadence']:
+                    CurrTestCadences.append(int(cad['measure']))
+
         # find equivalent in MyPath
-        MyFile = labelled_file.replace(TestData.LabelFileEnding, StateMachineData.LabelFileEnding)
+        if TestData is not WTCData:
+            MyFile = labelled_file.replace(TestData.LabelFileEnding, StateMachineData.LabelFileEnding)
+        else:
+            match = re.search(r'BWV (\d+)', labelled_fp['work'])
+            if match:
+                bwv_number = match.group(1)
+            MyFile = f"BWV_0{bwv_number}b_mxl_Analyzed.txt"
         MyFullPath = os.path.join(StateMachineData.DataPath, MyFile)
 
         with open(MyFullPath,'r') as f:
@@ -304,7 +391,7 @@ for labelled_fp in sorted(full_list):
         PredictionsTable.append([FileNameForText, CurrStateMachineCadences, PAC_density, CurrStateMachineCadencesTemporalPercent])
 
 # writing to console
-table_to_console = copy.deepcopy(CombinedTableExtended) if TestData.PACMeasureIndex else copy.deepcopy(PredictionsTable)
+table_to_console = copy.deepcopy(CombinedTableExtended) if TestData.isLabelled else copy.deepcopy(PredictionsTable)
 print('========Detection Table:==========')
 for row in table_to_console:
     print(row)
@@ -320,23 +407,23 @@ plot_temporal_pos_per_mov(mv_str, diachronically_sorted_predictions)
 # writing to latex
 now = datetime.now()
 current_time = now.strftime("%Y_%m_%d_%H_%M_%S")
-write_dir = os.path.join(StateMachineData.DataPath, os.pardir, 'Results', TestData.Label, CadenceString)
+write_dir = os.path.join(StateMachineData.DataPath, os.pardir, 'Results', TestData.Name, CadenceString)
 os.makedirs(write_dir,exist_ok=True)
 
 # write full table in latex format
-FullPathResults = os.path.join(write_dir, f"{TestData.Label}_FullClassificationsLatexTable.tex")
+FullPathResults = os.path.join(write_dir, f"{TestData.Name}_FullClassificationsLatexTable.tex")
 write_table_to_latex(CombinedTable, FullPathResults, comment=current_time)
 
 # write partial tables latex format
-FullPathResults = os.path.join(write_dir, f"{TestData.Label}_LabelsLatexTable.tex")
+FullPathResults = os.path.join(write_dir, f"{TestData.Name}_LabelsLatexTable.tex")
 write_table_to_latex(LabelsTable, FullPathResults, comment=current_time)
 
-FullPathResults = os.path.join(write_dir, f"{TestData.Label}_PredictionsLatexTable.tex")
+FullPathResults = os.path.join(write_dir, f"{TestData.Name}_PredictionsLatexTable.tex")
 write_table_to_latex([line[:2] for line in PredictionsTable], FullPathResults, comment=current_time)
 
 # write summary table in latex format
-if TestData.PACMeasureIndex:
-    FullPathResults = os.path.join(write_dir, f"{TestData.Label}_ScoresLatexTable.tex")
+if TestData.isLabelled:
+    FullPathResults = os.path.join(write_dir, f"{TestData.Name}_ScoresLatexTable.tex")
     ClassificationResultsTable = compute_classification_scores()
     write_table_to_latex(ClassificationResultsTable, FullPathResults, comment=current_time)
     max_misses = 0
