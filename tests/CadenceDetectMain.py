@@ -7,6 +7,7 @@ import multiprocessing as mp
 
 HomeDir = os.path.expanduser("~") if os.name != 'nt' else os.environ['USERPROFILE']
 DownloadsPath = os.path.join(HomeDir,'Downloads')
+BachWTCPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/BachWTC/mxl')
 SearsHaydnPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/SearsData')
 DCMLabMozartPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/DCMLab/mozart_piano_sonatas/scores_xml')
 DCMBeethovenPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/ABC_DCM/ABC/data/mxl')
@@ -15,19 +16,25 @@ MyPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/StateMachineData')
 TestPath = os.path.join(HomeDir,'Dropbox/PhD/CadencesResearch/TestData')
 
 # select analysis path
-InputFilePath = DCMLabMozartPath
+InputFilePath = SearsHaydnPath
 OutputFilePath = MyPath if InputFilePath != TestPath else os.path.join(InputFilePath, "StateMachineData/")
 
+OutputSubPaths = {BachWTCPath: "BachWTC", SearsHaydnPath: "SearsHaydn", DCMLabMozartPath: "DCMLabMozart", DCMBeethovenPath: "DCMLabBeethoven", TestPath: "Misc"}
+OutputFilePath = os.path.join(OutputFilePath, OutputSubPaths[InputFilePath])
+
+XMLFileEndings = {BachWTCPath: ".mxl", SearsHaydnPath: ".xml", DCMLabMozartPath: ".xml", DCMBeethovenPath: ".mxl", TestPath: ".xml"}
 # select files
 # all files in path
-XMLFileEnding = ".xml" if InputFilePath != DCMBeethovenPath else ".mxl"
+XMLFileEnding = XMLFileEndings[InputFilePath]
 # ===for testing haydn singe file
-# XMLFileEnding = "op020_no05_mv01.mid"
+XMLFileEnding = "op020_no04_mv01.xml"
 # ===for testing mozart single file
-XMLFileEnding = "533-3.xml"
+# XMLFileEnding = "576-2.xml"
 # XMLFileEnding = "279-2.xml"
 # ===for testing beethoven single file
 # XMLFileEnding = "op18_no1_mov2.xml"
+# ===for testing bach single file
+# XMLFileEnding = "BWV_0858b.mxl"
 # ===for testing a single file not in database
 # XMLFileEnding = "al_p69_1_1-82.mxl"
 # multi-core processing
@@ -47,19 +54,31 @@ OnlyGetNumMeasures = False
 # Cadence Detector Tunable Parameters
 MaxNumMeasures = 500
 MinInitialMeasures = 3
-MinPostCadenceMeasuresDict = {SearsHaydnPath: 2, DCMLabMozartPath: 0, DCMBeethovenPath: 0, TestPath: 3}
+MinPostCadenceMeasuresDict = {BachWTCPath: 2, SearsHaydnPath: 2, DCMLabMozartPath: 0, DCMBeethovenPath: 0, TestPath: 3}
 MinPostCadenceMeasures = MinPostCadenceMeasuresDict[InputFilePath]
 KeyDetectionMode = CDKeyDetectionModes.KSWithSmoothingCadenceSensitive
-KeyDetectionBlockSize = 4 # in measures
+KeyDetectionBlockSizes = {BachWTCPath: 1, SearsHaydnPath: 4, DCMLabMozartPath: 4, DCMBeethovenPath: 4, TestPath: 4}
+KeyDetectionBlockSize = KeyDetectionBlockSizes[InputFilePath] # in measures
 KeyDetectionOverlap = 1 / KeyDetectionBlockSize  # ratio from block size, this creates an step size of 1 measure
 KeyDetectionLookAhead = 0.5 # percentage from block size
-KeyDetectionForgetFactor = 0.8
-ReenforcementFactorsDict = {SearsHaydnPath: {'PAC': 2, 'IAC': 1, 'HC': 2},
+KeyDetectionForgetFactors = {BachWTCPath: 0.9, SearsHaydnPath: 0.8, DCMLabMozartPath: 0.8, DCMBeethovenPath: 0.8, TestPath: 0.8}
+KeyDetectionForgetFactor = KeyDetectionForgetFactors[InputFilePath]
+ReenforcementFactorsDict = {BachWTCPath: {'PAC': 3, 'IAC': 1, 'HC': 1},
+                            SearsHaydnPath: {'PAC': 2, 'IAC': 1, 'HC': 2},
                             DCMLabMozartPath: {'PAC': 3, 'IAC': 1, 'HC': 3/2},
                             DCMBeethovenPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2},
                             TestPath: {'PAC': 2, 'IAC': 1, 'HC': 3/2}}
 ReenforcementFactors = ReenforcementFactorsDict[InputFilePath]
-
+CompletePickupFormats = {BachWTCPath: False, SearsHaydnPath: True, DCMLabMozartPath: False, DCMBeethovenPath: False, TestPath: False}
+CompletePickupFormat = CompletePickupFormats[InputFilePath]
+RevertReboundPerData = {BachWTCPath: False, SearsHaydnPath: True, DCMLabMozartPath: True, DCMBeethovenPath: True, TestPath: True}
+RevertRebounds = RevertReboundPerData[InputFilePath]
+BeatStrengthsForGrouping = {BachWTCPath: 0.5, SearsHaydnPath: 1.0, DCMLabMozartPath: 1.0, DCMBeethovenPath: 1.0, TestPath: 1.0}
+BeatStrengthForGrouping = BeatStrengthsForGrouping[InputFilePath]
+IncludePicardys = {BachWTCPath: True, SearsHaydnPath: False, DCMLabMozartPath: False, DCMBeethovenPath: False, TestPath: False}
+IncludePicardy = IncludePicardys[InputFilePath]
+WeightedKeyInterps = {BachWTCPath: True, SearsHaydnPath: False, DCMLabMozartPath: False, DCMBeethovenPath: False, TestPath: False}
+WeightedKeyInterp = WeightedKeyInterps[InputFilePath]
 
 def findCadencesInFile(file, only_get_num_measures = False):
     try:
@@ -76,7 +95,12 @@ def findCadencesInFile(file, only_get_num_measures = False):
                                  keyDetectionForgetFactor=KeyDetectionForgetFactor,
                                  reinforcementFactors=ReenforcementFactors,
                                  keyDetectionBlockSize=KeyDetectionBlockSize,
-                                 keyDetectionOverlap=KeyDetectionOverlap)
+                                 keyDetectionOverlap=KeyDetectionOverlap,
+                                 completePickupFormat=CompletePickupFormat,
+                                 revertRebounds=RevertRebounds,
+                                 beatStrengthForGrouping=BeatStrengthForGrouping,
+                                 includePicardy=IncludePicardy,
+                                 weightedKeyInterp=WeightedKeyInterp)
             if only_get_num_measures:
                 CD.loadFileAndGetMeasures(FullPath)
             else:

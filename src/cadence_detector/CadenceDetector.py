@@ -20,7 +20,12 @@ class CadenceDetector:
                  reinforcementFactors=None,
                  keyDetectionLookahead = 0.5,
                  keyDetectionBlockSize=4,
-                 keyDetectionOverlap=0.25):
+                 keyDetectionOverlap=0.25,
+                 completePickupFormat=False,
+                 revertRebounds=True,
+                 beatStrengthForGrouping=1.0,
+                 includePicardy=False,
+                 weightedKeyInterp=False):
         if reinforcementFactors is None:
             reinforcementFactors = {'PAC': 3, 'IAC': 1, 'HC': 3 / 2}
         self.MaxNumMeasures = maxNumMeasures
@@ -30,8 +35,10 @@ class CadenceDetector:
         self.key_detection_lookahead = keyDetectionLookahead
         self.blockSize = keyDetectionBlockSize
         self.overlap = keyDetectionOverlap
-        self.HarmonicStateMachine = CDStateMachine(isChallenger=False, minInitialMeasures=minInitialMeasures, minPostCadenceMeasures=minPostCadenceMeasures)
-        self.HarmonicStateMachineChallenger = CDStateMachine(isChallenger=True, minInitialMeasures=minInitialMeasures, minPostCadenceMeasures=minPostCadenceMeasures)
+        self.HarmonicStateMachine = CDStateMachine(isChallenger=False, minInitialMeasures=minInitialMeasures, minPostCadenceMeasures=minPostCadenceMeasures, revertRebounds=revertRebounds, beatStrengthForGrouping=beatStrengthForGrouping, includePicardy=includePicardy)
+        self.HarmonicStateMachineChallenger1 = CDStateMachine(isChallenger=True, minInitialMeasures=minInitialMeasures, minPostCadenceMeasures=minPostCadenceMeasures, revertRebounds=revertRebounds, beatStrengthForGrouping=beatStrengthForGrouping, includePicardy=includePicardy)
+        self.HarmonicStateMachineChallenger2 = CDStateMachine(isChallenger=True, minInitialMeasures=minInitialMeasures, minPostCadenceMeasures=minPostCadenceMeasures, revertRebounds=revertRebounds, beatStrengthForGrouping=beatStrengthForGrouping, includePicardy=includePicardy)
+        self.NoteStream = []
         self.NoteStream = []
         self.NoteStreamRestless = []
         self.NoteStreamReduced = []
@@ -41,21 +48,24 @@ class CadenceDetector:
         self.KeyPerMeasure = []
         self.CorrectedKeyPerMeasure = []
         self.InterpretationsPerMeasure = []
+        self.InterpretationWeights = []
         self.SmoothedCorrCoefsPerMeasure = []
         self.CurrSmoothedInterpretations = {}
         #{'A': 0, 'B-': 0, 'B': 0, 'C': 0, 'C#': 0, 'D': 0,
         #'E-': 0, 'E': 0, 'F': 0, 'F#': 0, 'G': 0, 'A-': 0,
         #'a': 0, 'b-': 0, 'b': 0, 'c': 0, 'c#': 0, 'd': 0,
         #'e-': 0, 'e': 0, 'f': 0, 'f#': 0, 'g': 0, 'a-': 0}
-        self.Top2Keys = []
+        self.TopKeys = []
         self.PrevKeyString = []
-        self.PrevChallengerKeyString = []
+        self.PrevChallenger1KeyString = []
+        self.PrevChallenger2KeyString = []
         self.OptionalKeysPerMeasure = [[]]
         self.Parts = []
         self.MeasuresPerPart = []
         self.NumMeasures = 0
         self.fileName = 0
         self.hasPickupMeasure = 0
+        self.completePickupFormat = completePickupFormat
         self.WritePath = 0
         self.RepeatedMeasureByVolta = []
         self.IncompleteMeasures = []
@@ -68,6 +78,7 @@ class CadenceDetector:
         self.PrevMeasureArpeggio = False
         self.CadentialKeyChange = False
         self.AnchorRange = range(4,17)
+        self.WeightedKeyInterp = weightedKeyInterp
 
 
     def loadMusic21Corpus(self,fileString):
@@ -85,7 +96,8 @@ class CadenceDetector:
         self.NumMeasures = min(self.NumMeasures, self.MaxNumMeasures)
         #update some data to state machines
         self.HarmonicStateMachine.NumParts = self.NumParts
-        self.HarmonicStateMachineChallenger.NumParts = self.NumParts
+        self.HarmonicStateMachineChallenger1.NumParts = self.NumParts
+        self.HarmonicStateMachineChallenger2.NumParts = self.NumParts
         # do some other quick analysis for debugging without full cadence detection
         # self.findVoltas()
 
@@ -101,12 +113,14 @@ class CadenceDetector:
         try:
             self.ChordStream = NoteStreamNoGrace.chordify(addPartIdAsGroup=True, removeRedundantPitches=False, copyPitches=False)
             self.HarmonicStateMachine.CheckBassPartFromChord = True
-            self.HarmonicStateMachineChallenger.CheckBassPartFromChord = True
+            self.HarmonicStateMachineChallenger1.CheckBassPartFromChord = True
+            self.HarmonicStateMachineChallenger2.CheckBassPartFromChord = True
         except:
             print("Cannot add parts to chords!!")
             self.ChordStream = NoteStreamNoGrace.chordify(removeRedundantPitches=False, copyPitches=False)
             self.HarmonicStateMachine.CheckBassPartFromChord = False
-            self.HarmonicStateMachineChallenger.CheckBassPartFromChord = False
+            self.HarmonicStateMachineChallenger1.CheckBassPartFromChord = False
+            self.HarmonicStateMachineChallenger2.CheckBassPartFromChord = False
 
 
         self.NumMeasures = len(self.ChordStream.recurse().getElementsByClass(m21.stream.Measure))
@@ -251,15 +265,15 @@ class CadenceDetector:
         empty_measures = [i + 1 for i, emp in enumerate(self.EmptyMeasures) if emp]
         print('Empty measures:', empty_measures)
 
-
     def removePickupMeasure(self):
-        Parts = self.NoteStream.getElementsByClass(stream.Part)
-        self.hasPickupMeasure = 1
-        for part in Parts:
-            if not part.flat.notesAndRests[0].isRest:
-                self.hasPickupMeasure = 0
-                print("Pickup Cancelled")
-                break
+        if self.completePickupFormat:
+            Parts = self.NoteStream.getElementsByClass(stream.Part)
+            self.hasPickupMeasure = 1
+            for part in Parts:
+                if not part.flat.notesAndRests[0].isRest:
+                    self.hasPickupMeasure = 0
+                    print("Pickup Cancelled")
+                    break
 
     def addMyLablesToParts(self, note_stream):
         parts = note_stream.recurse().getElementsByClass(m21.stream.Part)
@@ -429,6 +443,10 @@ class CadenceDetector:
                 CurrInterpretations = list(self.InterpretationsPerMeasure[-1])
 
             self.InterpretationsPerMeasure.append(CurrInterpretations)
+            # weight by number of notes per block
+            self.InterpretationWeights.append(len(CurrMeasures.recurse().notes))
+        # normalize weights
+        self.InterpretationWeights = self.InterpretationWeights/np.max(self.InterpretationWeights)
 
     def setConstantKeyPerMeasure(self, key_string):
         const_key = m21.key.Key(key_string)
@@ -622,13 +640,18 @@ class CadenceDetector:
 
     def smoothKeyInterpretations(self, measureIndex):
         currInterpretations = self.InterpretationsPerMeasure[measureIndex]
+        if self.WeightedKeyInterp:
+            currWeight = self.InterpretationWeights[measureIndex]
+            currForgetFactor = 0.5 * (self.KeyDetectionForgetFactor + (1-currWeight))
+        else:
+            currForgetFactor = self.KeyDetectionForgetFactor
         for interpretation in currInterpretations:
             corrCoef = interpretation.correlationCoefficient
             keyString = interpretation.tonicPitchNameWithCase
             if keyString not in self.CurrSmoothedInterpretations:
                 self.CurrSmoothedInterpretations[keyString] = corrCoef
             currSmoothedVal = self.CurrSmoothedInterpretations[keyString]
-            currSmoothedVal = self.KeyDetectionForgetFactor * currSmoothedVal + (1-self.KeyDetectionForgetFactor) * corrCoef
+            currSmoothedVal = currForgetFactor * currSmoothedVal + (1-currForgetFactor) * corrCoef
             self.CurrSmoothedInterpretations[keyString] = currSmoothedVal
 
     def resetSmoothedInterpretations(self):
@@ -667,12 +690,12 @@ class CadenceDetector:
 
         # loop on measures:
         try:
-            # for debugging a measure range
-            # range_with_holes = itertools.chain(range(0, 4), range(70, 84))
+            # === for debugging a measure range
+            # range_with_holes = itertools.chain(range(0, 4), range(10, 20))
             # for currMeasureIndex in range_with_holes:
             for currMeasureIndex in range(0,self.NumMeasures):
                 # debug per measure
-                if currMeasureIndex == 79:
+                if currMeasureIndex == 7:
                     bla = 0
                 # true measures start with 1, pickups will start from zero, but not all corpora will abide to this
                 # for example, data that originates from midi cannot contain this info
@@ -688,7 +711,8 @@ class CadenceDetector:
                 # state machines need this for their first counters
                 isPickupMeasure = measure_number == 1 and self.hasPickupMeasure
                 self.HarmonicStateMachine.IsPickupMeasure = isPickupMeasure
-                self.HarmonicStateMachineChallenger.IsPickupMeasure = isPickupMeasure
+                self.HarmonicStateMachineChallenger1.IsPickupMeasure = isPickupMeasure
+                self.HarmonicStateMachineChallenger2.IsPickupMeasure = isPickupMeasure
 
                 # check and update timesig
                 curr_time_sig = self.check_and_update_timesig(CurrMeasures, curr_time_sig)
@@ -696,7 +720,8 @@ class CadenceDetector:
                 # reset state machines after repeat brackets, unless cadence inevitable (TBD  - add double barlines to this)
                 if currMeasureIndex > 0 and self.FinalBarlines[currMeasureIndex-1] and not (self.HarmonicStateMachine.getCadentialOutput() == CDCadentialStates.CadInevitable):
                     self.HarmonicStateMachine.reset()
-                    self.HarmonicStateMachineChallenger.reset()
+                    self.HarmonicStateMachineChallenger1.reset()
+                    self.HarmonicStateMachineChallenger2.reset()
                     self.resetSmoothedInterpretations()
 
                 if self.EmptyMeasures[currMeasureIndex]:
@@ -738,18 +763,20 @@ class CadenceDetector:
                     #smooth keys here, per measure (TBD - per chord?):
                     self.smoothKeyInterpretations(currMeasureIndex)
                     #sort and return top 2
-                    self.Top2Keys = self.getTopNKeyInterpretations(2)
+                    self.TopKeys = self.getTopNKeyInterpretations(3)
                 else:
                     currKey = self.KeyPerMeasure[currMeasureIndex]#lists start with 0
 
                 for thisChord, thisChordWithBassRests, alberti, arpeggio, thisRealNotes in zip(CurrMeasuresRestless.recurse().getElementsByClass('GeneralNote'),CurrMeasures.recurse().getElementsByClass('GeneralNote'), AlbertiBeats, ArpeggioBeatsFiltered, NotesPerChordBeatPerPart):
                     if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or\
                             self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
-                        currKeyString = self.Top2Keys[0][0]
+                        currKeyString = self.TopKeys[0][0]
                         currKey = m21.key.Key(currKeyString)
-                        challengerKeyString = self.Top2Keys[1][0]
-                        challengerKey = m21.key.Key(challengerKeyString)
-                        self.updateKeysAndSwapStateMachines(currKeyString, challengerKeyString)
+                        challenger1KeyString = self.TopKeys[1][0]
+                        challenger1Key = m21.key.Key(challenger1KeyString)
+                        challenger2KeyString = self.TopKeys[2][0]
+                        challenger2Key = m21.key.Key(challenger2KeyString)
+                        self.updateKeysAndSwapStateMachines(currKeyString, challenger1KeyString, challenger2KeyString)
 
                     # main key state machine
                     if thisChordWithBassRests.isRest:
@@ -761,10 +788,13 @@ class CadenceDetector:
                     # challenger key state machine
                     if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
                         if thisChordWithBassRests.isRest:
-                            self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio, [], thisRealNotes)
+                            self.HarmonicStateMachineChallenger1.updateHarmonicState(challenger1Key, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio, [], thisRealNotes)
+                            self.HarmonicStateMachineChallenger2.updateHarmonicState(challenger2Key, thisChord, thisChordWithBassRests, [], [], [], alberti, arpeggio, [], thisRealNotes)
                         else:
-                            rn2 = m21.roman.romanNumeralFromChord(thisChordWithBassRests, challengerKey)
-                            self.HarmonicStateMachineChallenger.updateHarmonicState(challengerKey, thisChord, thisChordWithBassRests, rn2.scaleDegree, rn2.inversion(), rn2.figure, alberti, arpeggio, rn2, thisRealNotes)
+                            rn2 = m21.roman.romanNumeralFromChord(thisChordWithBassRests, challenger1Key)
+                            self.HarmonicStateMachineChallenger1.updateHarmonicState(challenger1Key, thisChord, thisChordWithBassRests, rn2.scaleDegree, rn2.inversion(), rn2.figure, alberti, arpeggio, rn2, thisRealNotes)
+                            rn2 = m21.roman.romanNumeralFromChord(thisChordWithBassRests, challenger2Key)
+                            self.HarmonicStateMachineChallenger2.updateHarmonicState(challenger2Key, thisChord, thisChordWithBassRests, rn2.scaleDegree, rn2.inversion(), rn2.figure, alberti, arpeggio, rn2, thisRealNotes)
 
                     #TBD - should we handle this reversion in challenger?
                     if self.HarmonicStateMachine.getRevertLastPACAndReset() and len(LyricPerBeat) > 0: #this limits PAC reversion to within measure
@@ -784,7 +814,8 @@ class CadenceDetector:
                         print("Reverting last IAC")
 
                     Lyric = self.HarmonicStateMachine.getCadentialOutputString()
-                    LyricChallenger = self.HarmonicStateMachineChallenger.getCadentialOutputString()
+                    LyricChallenger1 = self.HarmonicStateMachineChallenger1.getCadentialOutputString()
+                    LyricChallenger2 = self.HarmonicStateMachineChallenger2.getCadentialOutputString()
                     # Cadence Sensitive Key Detection Mode
                     if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive:
                         # and self.HarmonicStateMachineChallenger.CurrHarmonicState.Key.tonic != self.HarmonicStateMachine.CurrHarmonicState.Key.tonic: #don't be sensitive to candece in parallel key:
@@ -795,22 +826,32 @@ class CadenceDetector:
                         for cad in self.ReinforcementFactors:
                             if cad in Lyric:
                                 # avoid reinforcement of HC if challenger is on dominant
-                                reenforce = not (currKey.getDominant().pitchClass == challengerKey.tonic.pitchClass and challengerKey.mode=='major' and (cad == 'HC'))
+                                reenforce = not (currKey.getDominant().pitchClass == challenger1Key.tonic.pitchClass and challenger1Key.mode=='major' and (cad == 'HC'))
                                 if reenforce:
                                     self.reenforceKeyByFactor(currKeyString, self.ReinforcementFactors[cad])
                             # Challenger Check (for key switching, but ignore HCs in subdominant key (becuase they are more likely PACs in main key))
-                            if cad in LyricChallenger:
-                                reenforce =  not (challengerKey.tonic.pitchClass == self.getSubDominantPitchClass(currKey) and challengerKey.mode=='major' and (cad == 'HC'))
+                            if cad in LyricChallenger1:
+                                reenforce =  not (challenger1Key.tonic.pitchClass == self.getSubDominantPitchClass(currKey) and challenger1Key.mode=='major' and (cad == 'HC'))
                                 if reenforce:
-                                    self.reenforceKeyByFactor(challengerKeyString, self.ReinforcementFactors[cad])
+                                    self.reenforceKeyByFactor(challenger1KeyString, self.ReinforcementFactors[cad])
+                                    resort = True
+                            if cad in LyricChallenger2:
+                                reenforce =  not (challenger2Key.tonic.pitchClass == self.getSubDominantPitchClass(currKey) and challenger2Key.mode=='major' and (cad == 'HC'))
+                                if reenforce:
+                                    self.reenforceKeyByFactor(challenger2KeyString, self.ReinforcementFactors[cad])
                                     resort = True
                         if resort:
                             # re-sort and return Top2Keys
-                            self.Top2Keys = self.getTopNKeyInterpretations(2)
-                            if challengerKeyString == self.Top2Keys[0][0]:
-                                Lyric = LyricChallenger
+                            self.TopKeys = self.getTopNKeyInterpretations(3)
+                            if challenger1KeyString == self.TopKeys[0][0]:
+                                Lyric = LyricChallenger1
                                 self.CadentialKeyChange = True
                                 print('Cadential Key Change!')
+                            if challenger2KeyString == self.TopKeys[0][0]:
+                                Lyric = LyricChallenger2
+                                self.CadentialKeyChange = True
+                                print('Cadential Key Change!')
+
 
                     # debugging
                     # print(self.HarmonicStateMachine.getCadentialOutput().value)
@@ -821,7 +862,10 @@ class CadenceDetector:
 
                     if Lyric:   # only work on non-empty lyrics
                         thisChord.lyric = Lyric
-                        LyricPerBeat.append([thisChord.beat,Lyric])
+                        # switching between major and minor of same key (parallel keys), keep the PAC
+                        #if challengerKey.tonic.pitchClass == currKey.tonic.pitchClass and 'PAC' in LyricChallenger:
+                        #    thisChord.lyric = Lyric + LyricChallenger
+                        LyricPerBeat.append([thisChord.beat,thisChord.lyric])
                         #TBD - do we still need to print this?
                         self.analysis_transition_strings.append(f"{measuresSecondsMap[currMeasureIndex]['offsetSeconds'] + measuresSecondsMap[currMeasureIndex]['durationSeconds']*(thisChord.beat-1)/CurrMeasuresRestless.duration.quarterLength:.1f} {self.HarmonicStateMachine.getCadentialOutput().value}")
 
@@ -873,7 +917,7 @@ class CadenceDetector:
 
                 #write corrected key at end of measure
                 if self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothingCadenceSensitive or self.KeyDetectionMode == CDKeyDetectionModes.KSWithSmoothing:
-                    correctedKeyString = self.Top2Keys[0][0]
+                    correctedKeyString = self.TopKeys[0][0]
                     correctedKey = m21.key.Key(correctedKeyString)
                     self.CorrectedKeyPerMeasure.append(correctedKey)
         except:
@@ -1121,29 +1165,38 @@ class CadenceDetector:
                 measure_time_sig = timeSig
                 if timeSig != self.HarmonicStateMachine.CurrHarmonicState.TimeSig:
                     self.HarmonicStateMachine.CurrHarmonicState.TimeSig = timeSig
-                    self.HarmonicStateMachineChallenger.CurrHarmonicState.TimeSig = timeSig
+                    self.HarmonicStateMachineChallenger1.CurrHarmonicState.TimeSig = timeSig
+                    self.HarmonicStateMachineChallenger2.CurrHarmonicState.TimeSig = timeSig
         return measure_time_sig
 
     def getSubDominantPitchClass(self, currKey):
         return (currKey.getDominant().pitchClass - 2) % 12
 
-    def updateKeysAndSwapStateMachines(self, currKeyString, challengerKeyString):
+    def updateKeysAndSwapStateMachines(self, currKeyString, challenger1KeyString, challenger2KeyString):
         # this swap assures the smoothness of key transition if challenger becomes main (and main becomes challenger)
         if currKeyString != self.PrevKeyString:
             tempStateMachine = copy.deepcopy(self.HarmonicStateMachine)
-            if currKeyString == self.PrevChallengerKeyString:
-                self.HarmonicStateMachine = copy.deepcopy(self.HarmonicStateMachineChallenger)
+            if currKeyString == self.PrevChallenger1KeyString:
+                self.HarmonicStateMachine = copy.deepcopy(self.HarmonicStateMachineChallenger1)
                 self.HarmonicStateMachine.CadentialKeyChange = 1
-            if challengerKeyString == self.PrevKeyString:
-                self.HarmonicStateMachineChallenger = copy.deepcopy(tempStateMachine)
+            if currKeyString == self.PrevChallenger2KeyString:
+                self.HarmonicStateMachine = copy.deepcopy(self.HarmonicStateMachineChallenger2)
+                self.HarmonicStateMachine.CadentialKeyChange = 1
+            if challenger1KeyString == self.PrevKeyString:
+                self.HarmonicStateMachineChallenger1 = copy.deepcopy(tempStateMachine)
+            if challenger2KeyString == self.PrevKeyString:
+                self.HarmonicStateMachineChallenger2 = copy.deepcopy(tempStateMachine)
             # reset post cadential counters
             if not self.CadentialKeyChange:
                 self.HarmonicStateMachine.resetPostCadentialCounters()
-            self.HarmonicStateMachineChallenger.resetPostCadentialCounters()
+            self.HarmonicStateMachineChallenger1.resetPostCadentialCounters()
+            self.HarmonicStateMachineChallenger2.resetPostCadentialCounters()
         self.PrevKeyString = currKeyString
-        self.PrevChallengerKeyString = challengerKeyString
+        self.PrevChallenger1KeyString = challenger1KeyString
+        self.PrevChallenger2KeyString = challenger2KeyString
         self.HarmonicStateMachine.IsChallenger = False
-        self.HarmonicStateMachineChallenger.IsChallenger = True
+        self.HarmonicStateMachineChallenger1.IsChallenger = True
+        self.HarmonicStateMachineChallenger2.IsChallenger = True
 
     def setFileName(self,fileName):
         self.fileName = fileName
